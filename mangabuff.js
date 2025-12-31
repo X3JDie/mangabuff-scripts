@@ -2,10 +2,10 @@
 // @name         MangaBuff Loader
 // @namespace    http://tampermonkey.net/
 // @version      1.0
-// @description  Подключает основной скрипт из локального файла
+// @description  Подключает основной скрипт из GitHub
 // @match        https://mangabuff.ru/*
 // @grant        none
-// @require
+// @require      https://raw.githubusercontent.com/X3JDie/mangabuff-scripts/refs/heads/main/mangabuff.js
 // ==/UserScript==
 
 (function () {
