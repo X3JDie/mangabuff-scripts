@@ -2,29 +2,26 @@
 // @name         MangaBuff Loader
 // @namespace    http://tampermonkey.net/
 // @version      1.0
-// @description  Подключает основной скрипт из GitHub
+// @description  Подключает основной скрипт из локального файла
 // @match        https://mangabuff.ru/*
 // @grant        none
-
+// @require
 // ==/UserScript==
-
 
 (function () {
   'use strict';
 
-  // ==============================
-  // 🔧 Утилиты
-  // ==============================
-  const CHECK_REWARD_INTERVAL = 30 * 1000;
+  console.log("[Loader] 📦Скрипт загружен из GitHub v1");
+  
+  const CHECK_REWARD_INTERVAL = 30000;
   const ADS_INTERVAL = 5000;
   const MINE_INTERVAL = 2000;
   const MINE_LIMIT = 120;
   const RELOAD_DELAY_MS = 1500;
   const TRIGGER_MINUTES = 19;
-
-  const COMMENT_CHECK_INTERVAL = 5 * 60 * 1000;
-  const COMMENT_MIN_DELAY = 30 * 60 * 1000;
-  const COMMENT_MAX_DELAY = 60 * 60 * 1000;
+  const COMMENT_CHECK_INTERVAL = 300000;
+  const COMMENT_MIN_DELAY = 1800000;
+  const COMMENT_MAX_DELAY = 3600000;
 
   let lastRewardClick = 0;
   let cardSpamInterval = null;
@@ -48,6 +45,13 @@
     return (h ? +h[1] * 60 : 0) + (m ? +m[1] : 0) + (s ? +s[1] / 60 : 0);
   }
 
+  function getLastRewardTimeFromStorage() {
+    const items = getRewards();
+    if (items.length === 0) return null;
+    const last = items.reduce((a, b) => (a.time > b.time ? a : b));
+    return typeof last.time === 'number' ? last.time : null;
+  }
+
   function showPopup(msg) {
     const div = document.createElement('div');
     div.textContent = msg;
@@ -68,19 +72,12 @@
   }
 
   function getTodayCounts() {
-    const today = getTodayKey();
+    const today = new Date().toLocaleDateString('ru-RU');
     const items = getRewards();
     return {
-      cards: items.filter(i => i.type === 'card'   && new Date(i.time).toLocaleDateString('ru-RU') === today).length,
+      cards: items.filter(i => i.type === 'card' && new Date(i.time).toLocaleDateString('ru-RU') === today).length,
       scrolls: items.filter(i => i.type === 'scroll' && new Date(i.time).toLocaleDateString('ru-RU') === today).length
     };
-  }
-
-  function getLastRewardTimeFromStorage() {
-    const items = getRewards();
-    if (items.length === 0) return null;
-    const last = items.reduce((a, b) => (a.time > b.time ? a : b));
-    return typeof last.time === 'number' ? last.time : null;
   }
 
   function getLastCardTime() {
@@ -103,106 +100,275 @@
     return isVisible(btn) ? btn : null;
   }
 
-  // ==============================
-  // 🎃 Event
-  // ==============================
   function isEventCompleted() {
     const eventBlock = document.querySelector('.user-quest__item--event .user-quest__text');
     const text = eventBlock?.textContent.replace(/\s+/g, ' ').trim() || '';
     const m = text.match(/Event\s+(\d+)\s+из\s+(\d+)/i);
     if (!m) return false;
-    const cur = +m[1], max = +m[2];
-    if (cur >= max) {
-      if (!localStorage.getItem('event_done_once')) {
-        console.log("✅ Event полностью завершён — обновляем страницу один раз");
-        localStorage.setItem('event_done_once', getTodayKey());
-        setTimeout(() => location.reload(), 2000);
-      }
-      return true;
-    }
-    return false;
+    return +m[1] >= +m[2];
   }
 
   function clickEventButton() {
     const btn = findQuestButton('event');
     if (btn) {
       btn.click();
-      showPopup('🎃 Клик по Event');
+      showPopup('Event');
     }
   }
 
-  // ==============================
-  // ❓ Квиз
-  // ==============================
-  function hasQuizToday() {
-    const stats = JSON.parse(localStorage.getItem("balance_stats") || "[]");
-    const today = getTodayKey();
-    const todayStats = stats.find(x => x.date === today);
-    if (!todayStats) return false;
-    return (todayStats.causes && todayStats.causes["Ежедневное прохождение квиза"] > 0);
+  function shouldStopComments() {
+    const block = document.querySelector('.user-quest__item--comments .user-quest__text');
+    if (!block) return false;
+    const m = block.textContent.match(/Комментариев\s+(\d+)\s+из\s+(\d+)/i);
+    return m ? (+m[1] >= +m[2]) : false;
   }
 
-  function checkQuiz() {
-    if (!hasQuizToday()) {
-      console.log("📗 Квиз не пройден — запускаем автопрохождение");
-      window.location.href = "/quiz";
-    } else {
-      console.log("✅ Квиз уже пройден сегодня");
+  function getRandomCommentTargetPage() {
+    return ["/auctions", "/rating"][Math.floor(Math.random() * 2)];
+  }
+
+  function scheduleComments() {
+    setInterval(() => {
+      if (shouldStopComments()) return;
+      const now = Date.now();
+      const next = +localStorage.getItem('next_comment_time') || 0;
+      if (next && now < next) return;
+      localStorage.setItem('pending_comment', 'true');
+      window.location.href = getRandomCommentTargetPage();
+    }, COMMENT_CHECK_INTERVAL);
+  }
+
+  function handleCommentPage() {
+    if (localStorage.getItem('pending_comment') !== 'true') return;
+    setTimeout(() => {
+      const textarea = document.querySelector('.comments__send-form textarea');
+      const sendBtn = document.querySelector('.comments__send-btn');
+      if (textarea && sendBtn) {
+        textarea.value = COMMENT_POOL[Math.floor(Math.random() * COMMENT_POOL.length)];
+        textarea.dispatchEvent(new Event('input', { bubbles: true }));
+        sendBtn.click();
+        const nextDelay = COMMENT_MIN_DELAY + Math.floor(Math.random() * (COMMENT_MAX_DELAY - COMMENT_MIN_DELAY));
+        localStorage.setItem('next_comment_time', Date.now() + nextDelay);
+        showPopup('Комментарий отправлен');
+      }
+      localStorage.removeItem('pending_comment');
+      setTimeout(() => window.location.href = "/balance", 2000);
+    }, 10000);
+  }
+
+  function clickReward() {
+    const btn = findQuestButton('read_rewards');
+    if (btn) {
+      btn.click();
+      lastRewardClick = Date.now();
+      showPopup('Награда за чтение');
     }
   }
+
+  function startCardSpamIfNeeded() {
+    const cardsToday = getTodayCounts().cards;
+    const readBlock = document.querySelector('.user-quest__item--read .user-quest__text');
+    const m = readBlock?.textContent.match(/Глав\s+(\d+)\s+из\s+(\d+)/);
+    const chaptersDone = m ? +m[1] : 0;
+    const lastCardTime = getLastCardTime();
+    if (chaptersDone >= 75 && cardsToday < 10 && lastCardTime) {
+      const minutes = (Date.now() - lastCardTime) / (60 * 1000);
+      if (minutes >= 60 && !cardSpamInterval) {
+        cardSpamInterval = setInterval(() => {
+          const nowCards = getTodayCounts().cards;
+          if (nowCards >= 10) {
+            clearInterval(cardSpamInterval);
+            cardSpamInterval = null;
+            return;
+          }
+          const lc = getLastCardTime();
+          const mins = lc ? (Date.now() - lc) / (60 * 1000) : 999;
+          if (mins >= 60) clickReward();
+        }, 60000);
+      }
+    }
+  }
+
+  function stopCardSpam() {
+    if (cardSpamInterval) {
+      clearInterval(cardSpamInterval);
+      cardSpamInterval = null;
+    }
+  }
+
+ function checkReward() {
+  const cardsToday = getTodayCounts().cards;
+  const readBlock = document.querySelector('.user-quest__item--read .user-quest__text');
+  const m = readBlock?.textContent.match(/Глав\s+(\d+)\s+из\s+(\d+)/);
+  const chaptersDone = m ? +m[1] : 0;
+
+  if (chaptersDone >= 75) {
+    if (cardsToday >= 10) {
+      stopCardSpam();
+      return;
+    }
+    startCardSpamIfNeeded();
+    return;
+  }
+
+  if (cardsToday >= 10) {
+    stopCardSpam();
+    return;
+  }
+
+  const rewardBlock = [...document.querySelectorAll('.user-quest__wrapper .user-quest__text')]
+    .find(e => /Последняя награда/i.test(e.textContent));
+  let minutes = null;
+  if (rewardBlock) {
+    minutes = parseTime(rewardBlock.textContent.trim());
+  } else {
+    const lastRewardTime = getLastRewardTimeFromStorage();
+    if (typeof lastRewardTime === 'number') {
+      minutes = (Date.now() - lastRewardTime) / (60 * 1000);
+    }
+  }
+
+  if (minutes !== null &&
+      minutes >= TRIGGER_MINUTES &&
+      Date.now() - lastRewardClick > 10 * 60 * 1000) {
+    clickReward();
+  }
+}
+
+function clickAds() {
+  const block = document.querySelector('.user-quest__item--watch_ads .user-quest__text');
+  const m = block?.textContent.match(/(\d+)\s+из\s+(\d+)/);
+  if (!m) return;
+  const cur = +m[1], max = +m[2];
+  if (cur < max) {
+    const btn = findQuestButton('watch_ads');
+    if (btn) {
+      btn.click();
+      showPopup('Реклама');
+    }
+  }
+}
+
+function mineLoop() {
+  const block = document.querySelector('.user-quest__item--mine .user-quest__text');
+  const m = block?.textContent.match(/Шахта\s+(\d+)\s+из\s+(\d+)/);
+  if (!m) return;
+  const cur = +m[1], max = +m[2];
+  if (cur < MINE_LIMIT && cur < max) {
+    const btn = findQuestButton('mine');
+    if (btn) {
+      btn.click();
+      showPopup('Шахта');
+    }
+  }
+}
+
+function clickChatDiamond() {
+  const btn = findQuestButton('chat_diamond');
+  if (btn) {
+    btn.click();
+    showPopup('Алмаз за чат');
+    setTimeout(() => location.reload(), RELOAD_DELAY_MS);
+  }
+}
+
+function scheduleChatDiamond() {
+  const delay = (15 * 60 + Math.floor(Math.random() * 10)) * 1000;
+  setTimeout(() => {
+    clickChatDiamond();
+    scheduleChatDiamond();
+  }, delay);
+}
+
+function hasQuizToday() {
+  const stats = JSON.parse(localStorage.getItem("balance_stats") || "[]");
+  const today = getTodayKey();
+  const todayStats = stats.find(x => x.date === today);
+  if (!todayStats) return false;
+  return (todayStats.causes && todayStats.causes["Ежедневное прохождение квиза"] > 0);
+}
+
+function checkQuiz() {
+  if (!hasQuizToday()) {
+    window.location.href = "/quiz";
+  }
+}
+
+if (window.location.pathname.startsWith("/quiz")) {
+  let answer = "";
+  let clickCount = 0;
+  const MAX_CLICKS = 11;
+
+  $.ajaxSetup({
+    headers: { 'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content') },
+    complete: function (params) {
+      if ('question' in params.responseJSON) {
+        answer = params.responseJSON.question.correct_text || "";
+      }
+    }
+  });
+
+  const observer = new MutationObserver(mutations => {
+    for (let mutation of mutations) {
+      if (mutation.type === 'childList') {
+        const items = document.querySelectorAll('.quiz__answer-item');
+        if (clickCount === 0 && items.length > 0 && !answer) {
+          items[0].click();
+          clickCount++;
+          return;
+        }
+        items.forEach(item => {
+          if (answer && item.innerText.trim() === answer.trim()) {
+            if (clickCount < MAX_CLICKS) {
+              setTimeout(() => {
+                item.click();
+                clickCount++;
+                if (clickCount >= MAX_CLICKS) {
+                  window.location.href = "/balance";
+                }
+              }, 5000);
+            }
+          }
+        });
+      }
+    }
+  });
+
+  const targetNode = document.querySelector('.quiz__answers');
+  if (targetNode) observer.observe(targetNode, { childList: true, subtree: true });
+}
 
 function clickUpdateDayButton() {
   const buttons = document.querySelectorAll("button.button");
   for (const btn of buttons) {
     if (btn.textContent.includes("Обновить статистику за день")) {
       btn.click();
-      console.log("▶️ Нажали на кнопку 'Обновить статистику за день'");
       return true;
     }
   }
-  console.log("⚠️ Кнопка 'Обновить статистику за день' не найдена");
   return false;
 }
-
-// ==============================
-// 🚀 Запуск
-// ==============================
-window.MANGABUFF_VERSION = "2026.01.01 v1";
-console.log("Загружена версия MangaBuff:", window.MANGABUFF_VERSION);
-
 
 if (window.location.pathname.startsWith("/balance")) {
   setTimeout(() => {
     if (!isEventCompleted()) {
-      console.log("🛑 Event не завершён — жмём Event и ждём лимит, остальные модули выключены");
       clickEventButton();
     } else {
-      console.log("✅ Event завершён — запускаем основной код");
-
       setInterval(checkReward, CHECK_REWARD_INTERVAL);
       setInterval(clickAds, ADS_INTERVAL);
       setInterval(mineLoop, MINE_INTERVAL);
-
       scheduleChatDiamond();
       scheduleComments();
-
-      // 👇 Проверка квиза
       setTimeout(() => {
         if (clickUpdateDayButton()) {
           setTimeout(() => {
             if (!hasQuizToday()) {
-              console.log("📗 Квиз не пройден — запускаем автопрохождение");
               window.location.href = "/quiz";
-            } else {
-              console.log("✅ Квиз уже пройден сегодня");
             }
           }, 5000 + Math.floor(Math.random() * 5000));
         } else {
           if (!hasQuizToday()) {
-            console.log("📗 Квиз не пройден — запускаем автопрохождение");
             window.location.href = "/quiz";
-          } else {
-            console.log("✅ Квиз уже пройден сегодня");
           }
         }
       }, 2000);
@@ -213,3 +379,5 @@ if (window.location.pathname.startsWith("/balance")) {
 if (window.location.pathname.startsWith("/auctions") || window.location.pathname.startsWith("/rating")) {
   handleCommentPage();
 }
+
+})();
