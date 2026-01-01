@@ -8,11 +8,12 @@
 // @require      https://raw.githubusercontent.com/X3JDie/mangabuff-scripts/refs/heads/main/mangabuff.js
 // ==/UserScript==
 
+
 (function () {
   'use strict';
 
   // ==============================
-  // Утилиты
+  // 🔧 Утилиты
   // ==============================
   const CHECK_REWARD_INTERVAL = 30 * 1000;
   const ADS_INTERVAL = 5000;
@@ -20,7 +21,6 @@
   const MINE_LIMIT = 120;
   const RELOAD_DELAY_MS = 1500;
   const TRIGGER_MINUTES = 19;
-
 
   const COMMENT_CHECK_INTERVAL = 5 * 60 * 1000;
   const COMMENT_MIN_DELAY = 30 * 60 * 1000;
@@ -37,20 +37,16 @@
     "День проходит спокойно 👍","Да всё нормально","Спасибо, дела идут хорошо!"
   ];
 
+  function getTodayKey() {
+    return new Date().toLocaleDateString('ru-RU');
+  }
+
   function parseTime(text) {
-  const h = text.match(/(\d+)\s*ч/);
-  const m = text.match(/(\d+)\s*мин/);
-  const s = text.match(/(\d+)\s*сек/);
-  return (h ? +h[1] * 60 : 0) + (m ? +m[1] : 0) + (s ? +s[1] / 60 : 0);
-}
-
-function getLastRewardTimeFromStorage() {
-  const items = getRewards();
-  if (items.length === 0) return null;
-  const last = items.reduce((a, b) => (a.time > b.time ? a : b));
-  return typeof last.time === 'number' ? last.time : null;
-}
-
+    const h = text.match(/(\d+)\s*ч/);
+    const m = text.match(/(\d+)\s*мин/);
+    const s = text.match(/(\d+)\s*сек/);
+    return (h ? +h[1] * 60 : 0) + (m ? +m[1] : 0) + (s ? +s[1] / 60 : 0);
+  }
 
   function showPopup(msg) {
     const div = document.createElement('div');
@@ -72,7 +68,7 @@ function getLastRewardTimeFromStorage() {
   }
 
   function getTodayCounts() {
-    const today = new Date().toLocaleDateString('ru-RU');
+    const today = getTodayKey();
     const items = getRewards();
     return {
       cards: items.filter(i => i.type === 'card'   && new Date(i.time).toLocaleDateString('ru-RU') === today).length,
@@ -80,10 +76,12 @@ function getLastRewardTimeFromStorage() {
     };
   }
 
-  function getTodayKey() {
-  return new Date().toLocaleDateString('ru-RU');
-}
-
+  function getLastRewardTimeFromStorage() {
+    const items = getRewards();
+    if (items.length === 0) return null;
+    const last = items.reduce((a, b) => (a.time > b.time ? a : b));
+    return typeof last.time === 'number' ? last.time : null;
+  }
 
   function getLastCardTime() {
     const cards = getRewards().filter(i => i.type === 'card');
@@ -105,34 +103,33 @@ function getLastRewardTimeFromStorage() {
     return isVisible(btn) ? btn : null;
   }
 
-  
- // ==============================
-// Event
-// ==============================
-function isEventCompleted() {
-  const eventBlock = document.querySelector('.user-quest__item--event .user-quest__text');
-  const text = eventBlock?.textContent.replace(/\s+/g, ' ').trim() || '';
-  const m = text.match(/Event\s+(\d+)\s+из\s+(\d+)/i);
-  if (!m) return false;
-  const cur = +m[1], max = +m[2];
-  if (cur >= max) {
-    if (!localStorage.getItem('event_done_once')) {
-      console.log("✅ Event полностью завершён — обновляем страницу один раз");
-      localStorage.setItem('event_done_once', 'true');
-      setTimeout(() => location.reload(), 2000);
+  // ==============================
+  // 🎃 Event
+  // ==============================
+  function isEventCompleted() {
+    const eventBlock = document.querySelector('.user-quest__item--event .user-quest__text');
+    const text = eventBlock?.textContent.replace(/\s+/g, ' ').trim() || '';
+    const m = text.match(/Event\s+(\d+)\s+из\s+(\d+)/i);
+    if (!m) return false;
+    const cur = +m[1], max = +m[2];
+    if (cur >= max) {
+      if (!localStorage.getItem('event_done_once')) {
+        console.log("✅ Event полностью завершён — обновляем страницу один раз");
+        localStorage.setItem('event_done_once', getTodayKey());
+        setTimeout(() => location.reload(), 2000);
+      }
+      return true;
     }
-    return true;
+    return false;
   }
-  return false;
-}
 
-function clickEventButton() {
-  const btn = findQuestButton('user-quest__item--event');
-  if (btn) {
-    btn.click();
-    showPopup(' Клик по Event');
+  function clickEventButton() {
+    const btn = findQuestButton('event');
+    if (btn) {
+      btn.click();
+      showPopup('🎃 Клик по Event');
+    }
   }
-}
 
   // ==============================
   // ❓ Квиз
@@ -154,260 +151,23 @@ function clickEventButton() {
     }
   }
 
-  function clickUpdateDayButton() {
-    const buttons = document.querySelectorAll("button.button");
-    for (const btn of buttons) {
-      if (btn.textContent.includes("Обновить статистику за день")) {
-        btn.click();
-        console.log("▶️ Нажали на кнопку 'Обновить статистику за день'");
-        return true;
-      }
-    }
-    console.log("⚠️ Кнопка 'Обновить статистику за день' не найдена");
-    return false;
-  }
-
-  if (window.location.pathname.startsWith("/quiz")) {
-    let answer = "";
-    let clickCount = 0;
-    const MAX_CLICKS = 11;
-
-    $.ajaxSetup({
-      headers: { 'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content') },
-      complete: function (params) {
-        if ('question' in params.responseJSON) {
-          answer = params.responseJSON.question.correct_text || "";
-        }
-      }
-    });
-
-    const observer = new MutationObserver(mutations => {
-      for (let mutation of mutations) {
-        if (mutation.type === 'childList') {
-          const items = document.querySelectorAll('.quiz__answer-item');
-          if (clickCount === 0 && items.length > 0 && !answer) {
-            items[0].click();
-            clickCount++;
-            console.log(`▶️ Первый вопрос: клик по любому варианту`);
-            return;
-          }
-          items.forEach(item => {
-            if (answer && item.innerText.trim() === answer.trim()) {
-              if (clickCount < MAX_CLICKS) {
-                setTimeout(() => {
-                  item.click();
-                  clickCount++;
-                  console.log(`✅ Клик по правильному ответу №${clickCount}`);
-                  if (clickCount >= MAX_CLICKS) {
-                    console.log("🛑 Квиз завершён, возвращаемся на баланс");
-                    window.location.href = "/balance";
-                  }
-                }, 5000);
-              }
-            }
-          });
-        }
-      }
-    });
-
-    const targetNode = document.querySelector('.quiz__answers');
-    if (targetNode) observer.observe(targetNode, { childList: true, subtree: true });
-  }
-
-  // ==============================
-  // Комментарии
-  // ==============================
-  function shouldStopComments() {
-    const block = document.querySelector('.user-quest__item--comments .user-quest__text');
-    if (!block) return false;
-    const m = block.textContent.match(/Комментариев\s+(\d+)\s+из\s+(\d+)/i);
-    return m ? (+m[1] >= +m[2]) : false;
-  }
-
-  function getRandomCommentTargetPage() {
-    return ["/auctions", "/rating"][Math.floor(Math.random() * 2)];
-  }
-
-  function scheduleComments() {
-    setInterval(() => {
-      if (shouldStopComments()) return;
-      const now = Date.now();
-      const next = +localStorage.getItem('next_comment_time') || 0;
-      if (next && now < next) return;
-
-      localStorage.setItem('pending_comment', 'true');
-      window.location.href = getRandomCommentTargetPage();
-    }, COMMENT_CHECK_INTERVAL);
-  }
-
-  function handleCommentPage() {
-    if (localStorage.getItem('pending_comment') !== 'true') return;
-    setTimeout(() => {
-      const textarea = document.querySelector('.comments__send-form textarea');
-      const sendBtn = document.querySelector('.comments__send-btn');
-      if (textarea && sendBtn) {
-        textarea.value = COMMENT_POOL[Math.floor(Math.random() * COMMENT_POOL.length)];
-        textarea.dispatchEvent(new Event('input', { bubbles: true }));
-        sendBtn.click();
-
-        const nextDelay = COMMENT_MIN_DELAY + Math.floor(Math.random() * (COMMENT_MAX_DELAY - COMMENT_MIN_DELAY));
-        localStorage.setItem('next_comment_time', Date.now() + nextDelay);
-        showPopup('Комментарий отправлен');
-      }
-      localStorage.removeItem('pending_comment');
-      setTimeout(() => window.location.href = "/balance", 2000);
-    }, 10000);
-  }
-
-  // ==============================
-  //Награды за чтение
-  // ==============================
-  function clickReward() {
-    const btn = findQuestButton('read_rewards');
-    if (btn) {
+function clickUpdateDayButton() {
+  const buttons = document.querySelectorAll("button.button");
+  for (const btn of buttons) {
+    if (btn.textContent.includes("Обновить статистику за день")) {
       btn.click();
-      lastRewardClick = Date.now();
-      showPopup(' Награда за чтение');
+      console.log("▶️ Нажали на кнопку 'Обновить статистику за день'");
+      return true;
     }
   }
-
-  function startCardSpamIfNeeded() {
-    const cardsToday = getTodayCounts().cards;
-    const readBlock = document.querySelector('.user-quest__item--read .user-quest__text');
-    const m = readBlock?.textContent.match(/Глав\s+(\d+)\s+из\s+(\d+)/);
-    const chaptersDone = m ? +m[1] : 0;
-    const lastCardTime = getLastCardTime();
-
-    if (chaptersDone >= 75 && cardsToday < 10 && lastCardTime) {
-      const minutes = (Date.now() - lastCardTime) / (60 * 1000);
-      if (minutes >= 60 && !cardSpamInterval) {
-        console.log(" Включаем режим: жмём награду раз в минуту до новой карты");
-        cardSpamInterval = setInterval(() => {
-          const nowCards = getTodayCounts().cards;
-          if (nowCards >= 10) {
-            console.log(" Достигли 10 карт — отключаем минутный режим");
-            clearInterval(cardSpamInterval);
-            cardSpamInterval = null;
-            return;
-          }
-          const lc = getLastCardTime();
-          const mins = lc ? (Date.now() - lc) / (60 * 1000) : 999;
-          if (mins >= 60) clickReward();
-        }, 60 * 1000);
-      }
-    }
-  }
-
-  function stopCardSpam() {
-    if (cardSpamInterval) {
-      clearInterval(cardSpamInterval);
-      cardSpamInterval = null;
-    }
-  }
-
- function checkReward() {
-  const cardsToday = getTodayCounts().cards;
-  const readBlock = document.querySelector('.user-quest__item--read .user-quest__text');
-  const m = readBlock?.textContent.match(/Глав\s+(\d+)\s+из\s+(\d+)/);
-  const chaptersDone = m ? +m[1] : 0;
-
-  // режим после лимита глав
-  if (chaptersDone >= 75) {
-    if (cardsToday >= 10) {
-      console.log(" Лимит глав и карт достигнут");
-      stopCardSpam();
-      return;
-    }
-    startCardSpamIfNeeded();
-    return;
-  }
-
-  // обычная логика (главы < 75)
-  if (cardsToday >= 10) {
-    console.log(" Лимит карт достигнут");
-    stopCardSpam();
-    return;
-  }
-
-  // проверка таймера награды
-  const rewardBlock = document.querySelector('.reward-time');
-  let minutes = null;
-  if (rewardBlock) {
-    minutes = parseTime(rewardBlock.textContent.trim());
-  } else {
-    const lastRewardTime = getLastRewardTimeFromStorage();
-    if (typeof lastRewardTime === 'number') {
-      minutes = (Date.now() - lastRewardTime) / (60 * 1000);
-    }
-  }
-
-  if (minutes !== null &&
-      minutes >= TRIGGER_MINUTES &&
-      Date.now() - lastRewardClick > 10 * 60 * 1000) {
-    clickReward();
-  }
+  console.log("⚠️ Кнопка 'Обновить статистику за день' не найдена");
+  return false;
 }
 
-  // ==============================
-  // Реклама
-  // ==============================
-  function clickAds() {
-    const block = document.querySelector('.user-quest__item--watch_ads .user-quest__text');
-    const m = block?.textContent.match(/(\d+)\s+из\s+(\d+)/);
-    if (!m) return;
-    const cur = +m[1], max = +m[2];
-    if (cur < max) {
-      const btn = findQuestButton('watch_ads');
-      if (btn) {
-        btn.click();
-        showPopup(' Реклама');
-      }
-    }
-  }
-
-  // ==============================
-  // Шахта
-  // ==============================
-  function mineLoop() {
-    const block = document.querySelector('.user-quest__item--mine .user-quest__text');
-    const m = block?.textContent.match(/Шахта\s+(\d+)\s+из\s+(\d+)/);
-    if (!m) return;
-    const cur = +m[1], max = +m[2];
-    if (cur < MINE_LIMIT && cur < max) {
-      const btn = findQuestButton('mine');
-      if (btn) {
-        btn.click();
-        showPopup(' Шахта');
-      }
-    }
-  }
-
-  // ==============================
-  // Алмаз за чат
-  // ==============================
-  function clickChatDiamond() {
-    const btn = findQuestButton('chat_diamond');
-    if (btn) {
-      btn.click();
-      showPopup(' Алмаз за чат');
-      setTimeout(() => location.reload(), RELOAD_DELAY_MS);
-    }
-  }
-
-  function scheduleChatDiamond() {
-    const delay = (15 * 60 + Math.floor(Math.random() * 10)) * 1000;
-    setTimeout(() => {
-      clickChatDiamond();
-      scheduleChatDiamond();
-    }, delay);
-  }
-
-
 // ==============================
-// Запуск
+// 🚀 Запуск
 // ==============================
-console.log("[MangaBuff] ⏱️ Время загрузки:", new Date().toLocaleString());
-console.log('[AutoReward] Event-aware + Quiz запущен');
+console.log('[AutoReward] 🚀 Mangabuff Git V1');
 
 if (window.location.pathname.startsWith("/balance")) {
   setTimeout(() => {
@@ -424,6 +184,7 @@ if (window.location.pathname.startsWith("/balance")) {
       scheduleChatDiamond();
       scheduleComments();
 
+      // 👇 Проверка квиза
       setTimeout(() => {
         if (clickUpdateDayButton()) {
           setTimeout(() => {
@@ -436,7 +197,10 @@ if (window.location.pathname.startsWith("/balance")) {
           }, 5000 + Math.floor(Math.random() * 5000));
         } else {
           if (!hasQuizToday()) {
+            console.log("📗 Квиз не пройден — запускаем автопрохождение");
             window.location.href = "/quiz";
+          } else {
+            console.log("✅ Квиз уже пройден сегодня");
           }
         }
       }, 2000);
@@ -447,7 +211,3 @@ if (window.location.pathname.startsWith("/balance")) {
 if (window.location.pathname.startsWith("/auctions") || window.location.pathname.startsWith("/rating")) {
   handleCommentPage();
 }
-
-
-
-})();
