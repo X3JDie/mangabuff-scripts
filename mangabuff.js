@@ -129,72 +129,85 @@ function clickEventButton() {
   }
 }
 
-// ==============================
-// Квиз
-// ==============================
-function hasQuizToday() {
-  const stats = JSON.parse(localStorage.getItem("balance_stats") || "[]");
-  const today = getTodayKey();
-  const todayStats = stats.find(x => x.date === today);
-  if (!todayStats) return false;
-  return (todayStats.causes && todayStats.causes["Ежедневное прохождение квиза"] > 0);
-}
-
-function checkQuiz() {
-  if (!hasQuizToday()) {
-    console.log("Квиз не пройден — запускаем автопрохождение");
-    window.location.href = "/quiz";
-  } else {
-    console.log(" Квиз уже пройден сегодня");
+  // ==============================
+  // ❓ Квиз
+  // ==============================
+  function hasQuizToday() {
+    const stats = JSON.parse(localStorage.getItem("balance_stats") || "[]");
+    const today = getTodayKey();
+    const todayStats = stats.find(x => x.date === today);
+    if (!todayStats) return false;
+    return (todayStats.causes && todayStats.causes["Ежедневное прохождение квиза"] > 0);
   }
-}
 
-if (window.location.pathname.startsWith("/quiz")) {
-  let answer = "";
-  let clickCount = 0;
-  const MAX_CLICKS = 11;
+  function checkQuiz() {
+    if (!hasQuizToday()) {
+      console.log("📗 Квиз не пройден — запускаем автопрохождение");
+      window.location.href = "/quiz";
+    } else {
+      console.log("✅ Квиз уже пройден сегодня");
+    }
+  }
 
-  $.ajaxSetup({
-    headers: { 'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content') },
-    complete: function (params) {
-      if ('question' in params.responseJSON) {
-        answer = params.responseJSON.question.correct_text || "";
+  function clickUpdateDayButton() {
+    const buttons = document.querySelectorAll("button.button");
+    for (const btn of buttons) {
+      if (btn.textContent.includes("Обновить статистику за день")) {
+        btn.click();
+        console.log("▶️ Нажали на кнопку 'Обновить статистику за день'");
+        return true;
       }
     }
-  });
+    console.log("⚠️ Кнопка 'Обновить статистику за день' не найдена");
+    return false;
+  }
 
-  const observer = new MutationObserver(mutations => {
-    for (let mutation of mutations) {
-      if (mutation.type === 'childList') {
-        const items = document.querySelectorAll('.quiz__answer-item');
-        if (clickCount === 0 && items.length > 0 && !answer) {
-          items[0].click();
-          clickCount++;
-          console.log(` Первый вопрос: клик по любому варианту`);
-          return;
+  if (window.location.pathname.startsWith("/quiz")) {
+    let answer = "";
+    let clickCount = 0;
+    const MAX_CLICKS = 11;
+
+    $.ajaxSetup({
+      headers: { 'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content') },
+      complete: function (params) {
+        if ('question' in params.responseJSON) {
+          answer = params.responseJSON.question.correct_text || "";
         }
-        items.forEach(item => {
-          if (answer && item.innerText.trim() === answer.trim()) {
-            if (clickCount < MAX_CLICKS) {
-              setTimeout(() => {
-                item.click();
-                clickCount++;
-                console.log(`✅ Клик по правильному ответу №${clickCount}`);
-                if (clickCount >= MAX_CLICKS) {
-                  console.log(" Квиз завершён, возвращаемся на баланс");
-                  window.location.href = "/balance";
-                }
-              }, 5000);
-            }
-          }
-        });
       }
-    }
-  });
+    });
 
-  const targetNode = document.querySelector('.quiz__answers');
-  if (targetNode) observer.observe(targetNode, { childList: true, subtree: true });
-}
+    const observer = new MutationObserver(mutations => {
+      for (let mutation of mutations) {
+        if (mutation.type === 'childList') {
+          const items = document.querySelectorAll('.quiz__answer-item');
+          if (clickCount === 0 && items.length > 0 && !answer) {
+            items[0].click();
+            clickCount++;
+            console.log(`▶️ Первый вопрос: клик по любому варианту`);
+            return;
+          }
+          items.forEach(item => {
+            if (answer && item.innerText.trim() === answer.trim()) {
+              if (clickCount < MAX_CLICKS) {
+                setTimeout(() => {
+                  item.click();
+                  clickCount++;
+                  console.log(`✅ Клик по правильному ответу №${clickCount}`);
+                  if (clickCount >= MAX_CLICKS) {
+                    console.log("🛑 Квиз завершён, возвращаемся на баланс");
+                    window.location.href = "/balance";
+                  }
+                }, 5000);
+              }
+            }
+          });
+        }
+      }
+    });
+
+    const targetNode = document.querySelector('.quiz__answers');
+    if (targetNode) observer.observe(targetNode, { childList: true, subtree: true });
+  }
 
   // ==============================
   // Комментарии
@@ -389,11 +402,9 @@ if (window.location.pathname.startsWith("/quiz")) {
 // Запуск
 // ==============================
 console.log("[MangaBuff] ⏱️ Время загрузки:", new Date().toLocaleString());
-
-console.log('[AutoReward] 🚀 Event-aware запущен');
+console.log('[AutoReward] Event-aware + Quiz запущен');
 
 if (window.location.pathname.startsWith("/balance")) {
-  // даём сайту время прогрузиться
   setTimeout(() => {
     if (!isEventCompleted()) {
       console.log("🛑 Event не завершён — жмём Event и ждём лимит, остальные модули выключены");
@@ -407,13 +418,31 @@ if (window.location.pathname.startsWith("/balance")) {
 
       scheduleChatDiamond();
       scheduleComments();
+
+      setTimeout(() => {
+        if (clickUpdateDayButton()) {
+          setTimeout(() => {
+            if (!hasQuizToday()) {
+              console.log("📗 Квиз не пройден — запускаем автопрохождение");
+              window.location.href = "/quiz";
+            } else {
+              console.log("✅ Квиз уже пройден сегодня");
+            }
+          }, 5000 + Math.floor(Math.random() * 5000));
+        } else {
+          if (!hasQuizToday()) {
+            window.location.href = "/quiz";
+          }
+        }
+      }, 2000);
     }
-  }, 3000); // 3 секунды
+  }, 3000);
 }
 
 if (window.location.pathname.startsWith("/auctions") || window.location.pathname.startsWith("/rating")) {
   handleCommentPage();
 }
+
 
 
 })();
