@@ -100,24 +100,101 @@ function getLastRewardTimeFromStorage() {
     return isVisible(btn) ? btn : null;
   }
 
-  // ==============================
-  // Event
-  // ==============================
-  function isEventCompleted() {
-    const eventBlock = document.querySelector('.user-quest__item--event .user-quest__text');
-    const text = eventBlock?.textContent.replace(/\s+/g, ' ').trim() || '';
-    const m = text.match(/Event\s+(\d+)\s+из\s+(\d+)/i);
-    if (!m) return false;
-    return +m[1] >= +m[2];
-  }
-
-  function clickEventButton() {
-    const btn = findQuestButton('event');
-    if (btn) {
-      btn.click();
-      showPopup(' Клик по Event');
+  
+ // ==============================
+// Event
+// ==============================
+function isEventCompleted() {
+  const eventBlock = document.querySelector('.user-quest__item--event .user-quest__text');
+  const text = eventBlock?.textContent.replace(/\s+/g, ' ').trim() || '';
+  const m = text.match(/Event\s+(\d+)\s+из\s+(\d+)/i);
+  if (!m) return false;
+  const cur = +m[1], max = +m[2];
+  if (cur >= max) {
+    if (!localStorage.getItem('event_done_once')) {
+      console.log("✅ Event полностью завершён — обновляем страницу один раз");
+      localStorage.setItem('event_done_once', 'true');
+      setTimeout(() => location.reload(), 2000);
     }
+    return true;
   }
+  return false;
+}
+
+function clickEventButton() {
+  const btn = findQuestButton('user-quest__item--event');
+  if (btn) {
+    btn.click();
+    showPopup(' Клик по Event');
+  }
+}
+
+// ==============================
+// Квиз
+// ==============================
+function hasQuizToday() {
+  const stats = JSON.parse(localStorage.getItem("balance_stats") || "[]");
+  const today = getTodayKey();
+  const todayStats = stats.find(x => x.date === today);
+  if (!todayStats) return false;
+  return (todayStats.causes && todayStats.causes["Ежедневное прохождение квиза"] > 0);
+}
+
+function checkQuiz() {
+  if (!hasQuizToday()) {
+    console.log("Квиз не пройден — запускаем автопрохождение");
+    window.location.href = "/quiz";
+  } else {
+    console.log(" Квиз уже пройден сегодня");
+  }
+}
+
+if (window.location.pathname.startsWith("/quiz")) {
+  let answer = "";
+  let clickCount = 0;
+  const MAX_CLICKS = 11;
+
+  $.ajaxSetup({
+    headers: { 'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content') },
+    complete: function (params) {
+      if ('question' in params.responseJSON) {
+        answer = params.responseJSON.question.correct_text || "";
+      }
+    }
+  });
+
+  const observer = new MutationObserver(mutations => {
+    for (let mutation of mutations) {
+      if (mutation.type === 'childList') {
+        const items = document.querySelectorAll('.quiz__answer-item');
+        if (clickCount === 0 && items.length > 0 && !answer) {
+          items[0].click();
+          clickCount++;
+          console.log(` Первый вопрос: клик по любому варианту`);
+          return;
+        }
+        items.forEach(item => {
+          if (answer && item.innerText.trim() === answer.trim()) {
+            if (clickCount < MAX_CLICKS) {
+              setTimeout(() => {
+                item.click();
+                clickCount++;
+                console.log(`✅ Клик по правильному ответу №${clickCount}`);
+                if (clickCount >= MAX_CLICKS) {
+                  console.log(" Квиз завершён, возвращаемся на баланс");
+                  window.location.href = "/balance";
+                }
+              }, 5000);
+            }
+          }
+        });
+      }
+    }
+  });
+
+  const targetNode = document.querySelector('.quiz__answers');
+  if (targetNode) observer.observe(targetNode, { childList: true, subtree: true });
+}
 
   // ==============================
   // Комментарии
