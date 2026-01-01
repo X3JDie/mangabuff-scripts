@@ -5,7 +5,7 @@
 // @description  Подключает основной скрипт из GitHub
 // @match        https://mangabuff.ru/*
 // @grant        none
-// @require      https://raw.githubusercontent.com/X3JDie/mangabuff-scripts/refs/heads/main/mangabuff.js
+
 // ==/UserScript==
 
 
