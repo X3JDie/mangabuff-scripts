@@ -80,6 +80,11 @@ function getLastRewardTimeFromStorage() {
     };
   }
 
+  function getTodayKey() {
+  return new Date().toLocaleDateString('ru-RU');
+}
+
+
   function getLastCardTime() {
     const cards = getRewards().filter(i => i.type === 'card');
     if (cards.length === 0) return null;
