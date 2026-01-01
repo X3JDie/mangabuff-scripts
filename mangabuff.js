@@ -167,7 +167,9 @@ function clickUpdateDayButton() {
 // ==============================
 // 🚀 Запуск
 // ==============================
-console.log('[AutoReward] 🚀 Mangabuff Git V1');
+window.MANGABUFF_VERSION = "2026.01.01 v1";
+console.log("Загружена версия MangaBuff:", window.MANGABUFF_VERSION);
+
 
 if (window.location.pathname.startsWith("/balance")) {
   setTimeout(() => {
