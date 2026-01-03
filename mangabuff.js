@@ -11,7 +11,7 @@
 (function () {
   'use strict';
 
-  console.log("[Loader] 📦Скрипт загружен из GitHub v2.2");
+  console.log("[Loader] 📦Скрипт загружен из GitHub v2.3");
   
   const CHECK_REWARD_INTERVAL = 30000;
   const ADS_INTERVAL = 5000;
@@ -434,5 +434,9 @@ if (window.location.pathname.startsWith("/balance")) {
     }
   }, 3000);
 }
-
+  
+if (window.location.pathname.startsWith("/auctions") || window.location.pathname.startsWith("/rating")) {
+  handleCommentPage();
+}
+  
 })();
