@@ -156,9 +156,15 @@ function proceedEventCheck() {
   if (!isEventCompleted()) {
     clickEventButton();
   } else {
+    if (!localStorage.getItem("event_reload_done")) {
+      localStorage.setItem("event_reload_done", "true");
       location.reload();
+    } else {
+      console.log("[Loader] Эвент собран, reload уже был");
+    }
   }
 }
+
   
   function clickEventButton() {
     const btn = findQuestButton('event');
