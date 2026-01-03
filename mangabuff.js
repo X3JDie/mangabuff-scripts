@@ -11,7 +11,7 @@
 (function () {
   'use strict';
 
-  console.log("[Loader] 📦Скрипт загружен из GitHub v1");
+  console.log("[Loader] 📦Скрипт загружен из GitHub v2");
   
   const CHECK_REWARD_INTERVAL = 30000;
   const ADS_INTERVAL = 5000;
@@ -108,6 +108,43 @@
     return +m[1] >= +m[2];
   }
 
+  function getReadChapters() {
+  const block = document.querySelector('.user-quest__item--read .user-quest__text');
+  const m = block?.textContent.match(/Глав\s+(\d+)\s+из\s+(\d+)/);
+  return m ? +m[1] : 0;
+}
+
+function clickReadButton() {
+  const btn = findQuestButton('read');
+  if (btn) {
+    btn.click();
+    showPopup('Чтение главы');
+  }
+}
+
+function ensureTenChaptersThenEvent() {
+  const chapters = getReadChapters();
+  if (chapters < 10) {
+    clickReadButton();
+     const interval = setInterval(() => {
+      if (getReadChapters() >= 10) {
+        clearInterval(interval);
+        proceedEventCheck();
+      }
+    }, 5000);
+  } else {
+    proceedEventCheck();
+  }
+}
+
+function proceedEventCheck() {
+  if (!isEventCompleted()) {
+    clickEventButton();
+  } else {
+      location.reload();
+  }
+}
+  
   function clickEventButton() {
     const btn = findQuestButton('event');
     if (btn) {
@@ -351,14 +388,15 @@ function clickUpdateDayButton() {
 
 if (window.location.pathname.startsWith("/balance")) {
   setTimeout(() => {
-    if (!isEventCompleted()) {
-      clickEventButton();
-    } else {
+    ensureTenChaptersThenEvent();
+
+    if (isEventCompleted() && getReadChapters() >= 10) {
       setInterval(checkReward, CHECK_REWARD_INTERVAL);
       setInterval(clickAds, ADS_INTERVAL);
       setInterval(mineLoop, MINE_INTERVAL);
       scheduleChatDiamond();
       scheduleComments();
+
       setTimeout(() => {
         if (clickUpdateDayButton()) {
           setTimeout(() => {
@@ -374,10 +412,6 @@ if (window.location.pathname.startsWith("/balance")) {
       }, 2000);
     }
   }, 3000);
-}
-
-if (window.location.pathname.startsWith("/auctions") || window.location.pathname.startsWith("/rating")) {
-  handleCommentPage();
 }
 
 })();
