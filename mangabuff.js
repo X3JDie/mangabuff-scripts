@@ -11,7 +11,7 @@
 (function () {
   'use strict';
 
-  console.log("[Loader] 📦Скрипт загружен из GitHub v2");
+  console.log("[Loader] 📦Скрипт загружен из GitHub v2.1");
   
   const CHECK_REWARD_INTERVAL = 30000;
   const ADS_INTERVAL = 5000;
@@ -122,20 +122,35 @@ function clickReadButton() {
   }
 }
 
-function ensureTenChaptersThenEvent() {
+function ensureChaptersThenEvent() {
   const chapters = getReadChapters();
-  if (chapters < 10) {
+
+  if (chapters < 5) {
     clickReadButton();
-     const interval = setInterval(() => {
-      if (getReadChapters() >= 10) {
-        clearInterval(interval);
-        proceedEventCheck();
+    const interval5 = setInterval(() => {
+      if (getReadChapters() >= 5) {
+        clearInterval(interval5);
+        location.reload(); 
       }
     }, 5000);
-  } else {
-    proceedEventCheck();
+    return;
   }
+
+  // шаг 2: читаем до 10
+  if (chapters < 10) {
+    clickReadButton();
+    const interval10 = setInterval(() => {
+      if (getReadChapters() >= 10) {
+        clearInterval(interval10);
+        location.reload();
+      }
+    }, 5000);
+    return;
+  }
+
+  proceedEventCheck();
 }
+
 
 function proceedEventCheck() {
   if (!isEventCompleted()) {
@@ -388,7 +403,7 @@ function clickUpdateDayButton() {
 
 if (window.location.pathname.startsWith("/balance")) {
   setTimeout(() => {
-    ensureTenChaptersThenEvent();
+    ensureChaptersThenEvent();
 
     if (isEventCompleted() && getReadChapters() >= 10) {
       setInterval(checkReward, CHECK_REWARD_INTERVAL);
