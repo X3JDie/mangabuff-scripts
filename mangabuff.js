@@ -161,7 +161,6 @@ function ensureChaptersThenEvent() {
     return;
   }
 
-  // шаг 2: читаем до 10
   if (chapters < 10) {
     clickReadButton();
     const interval10 = setInterval(() => {
@@ -173,9 +172,14 @@ function ensureChaptersThenEvent() {
     return;
   }
 
-  //proceedEventCheck();
-  location.reload();
+  if (!localStorage.getItem("chapters_reload_done")) {
+    localStorage.setItem("chapters_reload_done", "true");
+    location.reload();
+  } else {
+    console.log("[Loader] Главы >= 10, reload уже был");
+  }
 }
+
 
 
 
