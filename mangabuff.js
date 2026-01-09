@@ -417,7 +417,7 @@ if (window.location.pathname.startsWith("/balance")) {
     ensureChaptersThenEvent();
 
    // if (isEventCompleted() && getReadChapters() >= 10) {
-    (getReadChapters() >= 10) {
+      if (getReadChapters() >= 10) {
       setInterval(checkReward, CHECK_REWARD_INTERVAL);
       setInterval(clickAds, ADS_INTERVAL);
       setInterval(mineLoop, MINE_INTERVAL);
