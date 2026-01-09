@@ -11,7 +11,7 @@
 (function () {
   'use strict';
 
-  console.log("[Loader] 📦Скрипт загружен из GitHub v2.3");
+  console.log("[Loader] 📦Скрипт загружен из GitHub  Эвент окончен v3.1" );
   
   const CHECK_REWARD_INTERVAL = 30000;
   const ADS_INTERVAL = 5000;
@@ -101,13 +101,38 @@
   }
 
   function isEventCompleted() {
-    const eventBlock = document.querySelector('.user-quest__item--event .user-quest__text');
-    const text = eventBlock?.textContent.replace(/\s+/g, ' ').trim() || '';
-    const m = text.match(/Event\s+(\d+)\s+из\s+(\d+)/i);
-    if (!m) return false;
-    return +m[1] >= +m[2];
+    //Эвент закончен, вернуть когда начнется опять
+    // const eventBlock = document.querySelector('.user-quest__item--event .user-quest__text');
+    // const text = eventBlock?.textContent.replace(/\s+/g, ' ').trim() || '';
+    // const m = text.match(/Event\s+(\d+)\s+из\s+(\d+)/i);
+    // if (!m) return false;
+    // return +m[1] >= +m[2];
+    return true;
   }
 
+  
+function proceedEventCheck() {
+  // if (!isEventCompleted()) {
+  //   clickEventButton();
+  // } else {
+  //   if (!localStorage.getItem("event_reload_done")) {
+  //     localStorage.setItem("event_reload_done", "true");
+  //     location.reload();
+  //   } else {
+  //     console.log("[Loader] Эвент собран, reload уже был");
+  //   }
+  // }
+}
+
+  
+  function clickEventButton() {
+    // const btn = findQuestButton('event');
+    // if (btn) {
+    //   btn.click();
+    //   showPopup('Event');
+    // }
+  }
+  
   function getReadChapters() {
   const block = document.querySelector('.user-quest__item--read .user-quest__text');
   const m = block?.textContent.match(/Глав\s+(\d+)\s+из\s+(\d+)/);
@@ -148,31 +173,11 @@ function ensureChaptersThenEvent() {
     return;
   }
 
-  proceedEventCheck();
+  //proceedEventCheck();
+  location.reload();
 }
 
 
-function proceedEventCheck() {
-  if (!isEventCompleted()) {
-    clickEventButton();
-  } else {
-    if (!localStorage.getItem("event_reload_done")) {
-      localStorage.setItem("event_reload_done", "true");
-      location.reload();
-    } else {
-      console.log("[Loader] Эвент собран, reload уже был");
-    }
-  }
-}
-
-  
-  function clickEventButton() {
-    const btn = findQuestButton('event');
-    if (btn) {
-      btn.click();
-      showPopup('Event');
-    }
-  }
 
   function shouldStopComments() {
     const block = document.querySelector('.user-quest__item--comments .user-quest__text');
@@ -411,7 +416,8 @@ if (window.location.pathname.startsWith("/balance")) {
   setTimeout(() => {
     ensureChaptersThenEvent();
 
-    if (isEventCompleted() && getReadChapters() >= 10) {
+   // if (isEventCompleted() && getReadChapters() >= 10) {
+    (getReadChapters() >= 10) {
       setInterval(checkReward, CHECK_REWARD_INTERVAL);
       setInterval(clickAds, ADS_INTERVAL);
       setInterval(mineLoop, MINE_INTERVAL);
