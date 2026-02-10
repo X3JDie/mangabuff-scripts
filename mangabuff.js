@@ -11,7 +11,7 @@
 (function () {
   'use strict';
 
-  console.log("[Loader] 📦Скрипт загружен из GitHub  Эвент окончен v3.1.1" );
+  console.log("[Loader] 📦Скрипт загружен из GitHub  Эвент окончен v3.2.1" );
   
   const CHECK_REWARD_INTERVAL = 30000;
   const ADS_INTERVAL = 5000;
@@ -426,7 +426,7 @@ if (window.location.pathname.startsWith("/balance")) {
       setInterval(clickAds, ADS_INTERVAL);
       setInterval(mineLoop, MINE_INTERVAL);
       scheduleChatDiamond();
-      scheduleComments();
+    //  scheduleComments();
 
       setTimeout(() => {
         if (clickUpdateDayButton()) {
