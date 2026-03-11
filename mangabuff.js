@@ -448,5 +448,7 @@ if (window.location.pathname.startsWith("/balance")) {
 if (window.location.pathname.startsWith("/auctions") || window.location.pathname.startsWith("/rating")) {
   handleCommentPage();
 }
-  
+
+  window.MangaBuffMain = true;
+
 })();
