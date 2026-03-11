@@ -101,7 +101,7 @@
   }
 
   function isEventCompleted() {
-    Эвент закончен, вернуть когда начнется опять
+    // Эвент закончен, вернуть когда начнется опять
     const eventBlock = document.querySelector('.user-quest__item--event .user-quest__text');
     const text = eventBlock?.textContent.replace(/\s+/g, ' ').trim() || '';
     const m = text.match(/Event\s+(\d+)\s+из\s+(\d+)/i);
