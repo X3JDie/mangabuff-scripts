@@ -1,18 +1,17 @@
 // ==UserScript==
 // @name         MangaBuff Loader
 // @namespace    http://tampermonkey.net/
-// @version      1.0
-// @description  Подключает основной скрипт из локального файла
+// @version      1.1
+// @description  Подключает основной скрипт из локального файла с поддержкой эвента
 // @match        https://mangabuff.ru/*
 // @grant        none
-// @require
 // ==/UserScript==
 
 (function () {
   'use strict';
 
-  console.log("[Loader] 📦Скрипт загружен из GitHub  Эвент окончен v3.1.1" );
-  
+  console.log("[Loader] Скрипт загружен с эвентом v1.1");
+
   const CHECK_REWARD_INTERVAL = 30000;
   const ADS_INTERVAL = 5000;
   const MINE_INTERVAL = 2000;
@@ -100,88 +99,83 @@
     return isVisible(btn) ? btn : null;
   }
 
+  // ==== Эвент ====
   function isEventCompleted() {
-    //Эвент закончен, вернуть когда начнется опять
-    // const eventBlock = document.querySelector('.user-quest__item--event .user-quest__text');
-    // const text = eventBlock?.textContent.replace(/\s+/g, ' ').trim() || '';
-    // const m = text.match(/Event\s+(\d+)\s+из\s+(\d+)/i);
-    // if (!m) return false;
-    // return +m[1] >= +m[2];
-    return true;
+    const eventBlock = document.querySelector('.user-quest__item--event .user-quest__text');
+    const text = eventBlock?.textContent.replace(/\s+/g, ' ').trim() || '';
+    const m = text.match(/Event\s+(\d+)\s+из\s+(\d+)/i);
+    if (!m) return false;
+    return +m[1] >= +m[2];
   }
 
-  
-function proceedEventCheck() {
-  // if (!isEventCompleted()) {
-  //   clickEventButton();
-  // } else {
-  //   if (!localStorage.getItem("event_reload_done")) {
-  //     localStorage.setItem("event_reload_done", "true");
-  //     location.reload();
-  //   } else {
-  //     console.log("[Loader] Эвент собран, reload уже был");
-  //   }
-  // }
-}
-
-  
   function clickEventButton() {
-    // const btn = findQuestButton('event');
-    // if (btn) {
-    //   btn.click();
-    //   showPopup('Event');
-    // }
-  }
-  
-  function getReadChapters() {
-  const block = document.querySelector('.user-quest__item--read .user-quest__text');
-  const m = block?.textContent.match(/Глав\s+(\d+)\s+из\s+(\d+)/);
-  return m ? +m[1] : 0;
-}
-
-function clickReadButton() {
-  const btn = findQuestButton('read');
-  if (btn) {
-    btn.click();
-    showPopup('Чтение главы');
-  }
-}
-
-function ensureChaptersThenEvent() {
-  const chapters = getReadChapters();
-
-  if (chapters < 5) {
-    clickReadButton();
-    const interval5 = setInterval(() => {
-      if (getReadChapters() >= 5) {
-        clearInterval(interval5);
-        location.reload(); 
-      }
-    }, 5000);
-    return;
+    const btn = findQuestButton('event');
+    if (btn) {
+      btn.click();
+      showPopup('Event');
+    }
   }
 
-  if (chapters < 10) {
-    clickReadButton();
-    const interval10 = setInterval(() => {
-      if (getReadChapters() >= 10) {
-        clearInterval(interval10);
+  function proceedEventCheck() {
+    if (!isEventCompleted()) {
+      clickEventButton();
+    } else {
+      if (!localStorage.getItem("event_reload_done")) {
+        localStorage.setItem("event_reload_done", "true");
         location.reload();
+      } else {
+        console.log("[Loader] Эвент собран, reload уже был");
       }
-    }, 5000);
-    return;
+    }
+  }
+  // ==== /Эвент ====
+
+  function getReadChapters() {
+    const block = document.querySelector('.user-quest__item--read .user-quest__text');
+    const m = block?.textContent.match(/Глав\s+(\d+)\s+из\s+(\d+)/);
+    return m ? +m[1] : 0;
   }
 
-  if (!localStorage.getItem("chapters_reload_done")) {
-    localStorage.setItem("chapters_reload_done", "true");
-    location.reload();
-  } else {
-    console.log("[Loader] Главы >= 10, reload уже был");
+  function clickReadButton() {
+    const btn = findQuestButton('read');
+    if (btn) {
+      btn.click();
+      showPopup('Чтение главы');
+    }
   }
-}
 
+  function ensureChaptersThenEvent() {
+    const chapters = getReadChapters();
 
+    if (chapters < 5) {
+      clickReadButton();
+      const interval5 = setInterval(() => {
+        if (getReadChapters() >= 5) {
+          clearInterval(interval5);
+          location.reload(); 
+        }
+      }, 5000);
+      return;
+    }
 
+    if (chapters < 10) {
+      clickReadButton();
+      const interval10 = setInterval(() => {
+        if (getReadChapters() >= 10) {
+          clearInterval(interval10);
+          location.reload();
+        }
+      }, 5000);
+      return;
+    }
+
+    if (!localStorage.getItem("chapters_reload_done")) {
+      localStorage.setItem("chapters_reload_done", "true");
+      location.reload();
+    } else {
+      console.log("[Loader] Главы >= 10, reload уже был");
+    }
+  }
 
   function shouldStopComments() {
     const block = document.querySelector('.user-quest__item--comments .user-quest__text');
@@ -263,190 +257,146 @@ function ensureChaptersThenEvent() {
     }
   }
 
- function checkReward() {
-  const cardsToday = getTodayCounts().cards;
-  const readBlock = document.querySelector('.user-quest__item--read .user-quest__text');
-  const m = readBlock?.textContent.match(/Глав\s+(\d+)\s+из\s+(\d+)/);
-  const chaptersDone = m ? +m[1] : 0;
+  function checkReward() {
+    const cardsToday = getTodayCounts().cards;
+    const readBlock = document.querySelector('.user-quest__item--read .user-quest__text');
+    const m = readBlock?.textContent.match(/Глав\s+(\d+)\s+из\s+(\d+)/);
+    const chaptersDone = m ? +m[1] : 0;
 
-  if (chaptersDone >= 75) {
+    if (chaptersDone >= 75) {
+      if (cardsToday >= 10) {
+        stopCardSpam();
+        return;
+      }
+      startCardSpamIfNeeded();
+      return;
+    }
+
     if (cardsToday >= 10) {
       stopCardSpam();
       return;
     }
-    startCardSpamIfNeeded();
-    return;
-  }
 
-  if (cardsToday >= 10) {
-    stopCardSpam();
-    return;
-  }
-
-  const rewardBlock = [...document.querySelectorAll('.user-quest__wrapper .user-quest__text')]
-    .find(e => /Последняя награда/i.test(e.textContent));
-  let minutes = null;
-  if (rewardBlock) {
-    minutes = parseTime(rewardBlock.textContent.trim());
-  } else {
-    const lastRewardTime = getLastRewardTimeFromStorage();
-    if (typeof lastRewardTime === 'number') {
-      minutes = (Date.now() - lastRewardTime) / (60 * 1000);
-    }
-  }
-
-  if (minutes !== null &&
-      minutes >= TRIGGER_MINUTES &&
-      Date.now() - lastRewardClick > 10 * 60 * 1000) {
-    clickReward();
-  }
-}
-
-function clickAds() {
-  const block = document.querySelector('.user-quest__item--watch_ads .user-quest__text');
-  const m = block?.textContent.match(/(\d+)\s+из\s+(\d+)/);
-  if (!m) return;
-  const cur = +m[1], max = +m[2];
-  if (cur < max) {
-    const btn = findQuestButton('watch_ads');
-    if (btn) {
-      btn.click();
-      showPopup('Реклама');
-    }
-  }
-}
-
-function mineLoop() {
-  const block = document.querySelector('.user-quest__item--mine .user-quest__text');
-  const m = block?.textContent.match(/Шахта\s+(\d+)\s+из\s+(\d+)/);
-  if (!m) return;
-  const cur = +m[1], max = +m[2];
-  if (cur < MINE_LIMIT && cur < max) {
-    const btn = findQuestButton('mine');
-    if (btn) {
-      btn.click();
-      showPopup('Шахта');
-    }
-  }
-}
-
-function clickChatDiamond() {
-  const btn = findQuestButton('chat_diamond');
-  if (btn) {
-    btn.click();
-    showPopup('Алмаз за чат');
-    setTimeout(() => location.reload(), RELOAD_DELAY_MS);
-  }
-}
-
-function scheduleChatDiamond() {
-  const delay = (15 * 60 + Math.floor(Math.random() * 10)) * 1000;
-  setTimeout(() => {
-    clickChatDiamond();
-    scheduleChatDiamond();
-  }, delay);
-}
-
-function hasQuizToday() {
-  const stats = JSON.parse(localStorage.getItem("balance_stats") || "[]");
-  const today = getTodayKey();
-  const todayStats = stats.find(x => x.date === today);
-  if (!todayStats) return false;
-  return (todayStats.causes && todayStats.causes["Ежедневное прохождение квиза"] > 0);
-}
-
-function checkQuiz() {
-  if (!hasQuizToday()) {
-    window.location.href = "/quiz";
-  }
-}
-
-if (window.location.pathname.startsWith("/quiz")) {
-  let answer = "";
-  let clickCount = 0;
-  const MAX_CLICKS = 11;
-
-  $.ajaxSetup({
-    headers: { 'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content') },
-    complete: function (params) {
-      if ('question' in params.responseJSON) {
-        answer = params.responseJSON.question.correct_text || "";
+    const rewardBlock = [...document.querySelectorAll('.user-quest__wrapper .user-quest__text')]
+      .find(e => /Последняя награда/i.test(e.textContent));
+    let minutes = null;
+    if (rewardBlock) {
+      minutes = parseTime(rewardBlock.textContent.trim());
+    } else {
+      const lastRewardTime = getLastRewardTimeFromStorage();
+      if (typeof lastRewardTime === 'number') {
+        minutes = (Date.now() - lastRewardTime) / (60 * 1000);
       }
     }
-  });
 
-  const observer = new MutationObserver(mutations => {
-    for (let mutation of mutations) {
-      if (mutation.type === 'childList') {
-        const items = document.querySelectorAll('.quiz__answer-item');
-        if (clickCount === 0 && items.length > 0 && !answer) {
-          items[0].click();
-          clickCount++;
-          return;
-        }
-        items.forEach(item => {
-          if (answer && item.innerText.trim() === answer.trim()) {
-            if (clickCount < MAX_CLICKS) {
-              setTimeout(() => {
-                item.click();
-                clickCount++;
-                if (clickCount >= MAX_CLICKS) {
-                  window.location.href = "/balance";
-                }
-              }, 5000);
-            }
-          }
-        });
-      }
-    }
-  });
-
-  const targetNode = document.querySelector('.quiz__answers');
-  if (targetNode) observer.observe(targetNode, { childList: true, subtree: true });
-}
-
-function clickUpdateDayButton() {
-  const buttons = document.querySelectorAll("button.button");
-  for (const btn of buttons) {
-    if (btn.textContent.includes("Обновить статистику за день")) {
-      btn.click();
-      return true;
+    if (minutes !== null &&
+        minutes >= TRIGGER_MINUTES &&
+        Date.now() - lastRewardClick > 10 * 60 * 1000) {
+      clickReward();
     }
   }
-  return false;
-}
 
-if (window.location.pathname.startsWith("/balance")) {
-  setTimeout(() => {
-    ensureChaptersThenEvent();
+  function clickAds() {
+    const block = document.querySelector('.user-quest__item--watch_ads .user-quest__text');
+    const m = block?.textContent.match(/(\d+)\s+из\s+(\d+)/);
+    if (!m) return;
+    const cur = +m[1], max = +m[2];
+    if (cur < max) {
+      const btn = findQuestButton('watch_ads');
+      if (btn) {
+        btn.click();
+        showPopup('Реклама');
+      }
+    }
+  }
 
-   // if (isEventCompleted() && getReadChapters() >= 10) {
-      if (getReadChapters() >= 10) {
-      setInterval(checkReward, CHECK_REWARD_INTERVAL);
-      setInterval(clickAds, ADS_INTERVAL);
-      setInterval(mineLoop, MINE_INTERVAL);
+  function mineLoop() {
+    const block = document.querySelector('.user-quest__item--mine .user-quest__text');
+    const m = block?.textContent.match(/Шахта\s+(\d+)\s+из\s+(\d+)/);
+    if (!m) return;
+    const cur = +m[1], max = +m[2];
+    if (cur < MINE_LIMIT && cur < max) {
+      const btn = findQuestButton('mine');
+      if (btn) {
+        btn.click();
+        showPopup('Шахта');
+      }
+    }
+  }
+
+  function clickChatDiamond() {
+    const btn = findQuestButton('chat_diamond');
+    if (btn) {
+      btn.click();
+      showPopup('Алмаз за чат');
+      setTimeout(() => location.reload(), RELOAD_DELAY_MS);
+    }
+  }
+
+  function scheduleChatDiamond() {
+    const delay = (15 * 60 + Math.floor(Math.random() * 10)) * 1000;
+    setTimeout(() => {
+      clickChatDiamond();
       scheduleChatDiamond();
-      scheduleComments();
+    }, delay);
+  }
 
-      setTimeout(() => {
-        if (clickUpdateDayButton()) {
-          setTimeout(() => {
+  function hasQuizToday() {
+    const stats = JSON.parse(localStorage.getItem("balance_stats") || "[]");
+    const today = getTodayKey();
+    const todayStats = stats.find(x => x.date === today);
+    if (!todayStats) return false;
+    return (todayStats.causes && todayStats.causes["Ежедневное прохождение квиза"] > 0);
+  }
+
+  function checkQuiz() {
+    if (!hasQuizToday()) {
+      window.location.href = "/quiz";
+    }
+  }
+
+  function clickUpdateDayButton() {
+    const buttons = document.querySelectorAll("button.button");
+    for (const btn of buttons) {
+      if (btn.textContent.includes("Обновить статистику за день")) {
+        btn.click();
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // ================== MAIN ==================
+  if (window.location.pathname.startsWith("/balance")) {
+    setTimeout(() => {
+      ensureChaptersThenEvent();
+      proceedEventCheck();
+
+      if ((isEventCompleted() || !document.querySelector('.user-quest__item--event')) && getReadChapters() >= 10) {
+        setInterval(checkReward, CHECK_REWARD_INTERVAL);
+        setInterval(clickAds, ADS_INTERVAL);
+        setInterval(mineLoop, MINE_INTERVAL);
+        scheduleChatDiamond();
+        // scheduleComments(); //
+
+        setTimeout(() => {
+          if (clickUpdateDayButton()) {
+            setTimeout(() => {
+              if (!hasQuizToday()) {
+                window.location.href = "/quiz";
+              }
+            }, 5000 + Math.floor(Math.random() * 5000));
+          } else {
             if (!hasQuizToday()) {
               window.location.href = "/quiz";
             }
-          }, 5000 + Math.floor(Math.random() * 5000));
-        } else {
-          if (!hasQuizToday()) {
-            window.location.href = "/quiz";
           }
-        }
-      }, 2000);
-    }
-  }, 3000);
-}
-  
-if (window.location.pathname.startsWith("/auctions") || window.location.pathname.startsWith("/rating")) {
-  handleCommentPage();
-}
-  
+        }, 2000);
+      }
+    }, 3000);
+  }
+
+  if (window.location.pathname.startsWith("/auctions") || window.location.pathname.startsWith("/rating")) {
+    handleCommentPage();
+  }
 })();
