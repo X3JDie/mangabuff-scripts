@@ -11,7 +11,7 @@
 (function () {
   'use strict';
 
-  console.log("[Loader] 📦Скрипт загружен из GitHub  Эвент окончен v3.2.2" );
+  console.log("[Loader] 📦Скрипт загружен из GitHub  Эвент окончен v3.2.3" );
   
   const CHECK_REWARD_INTERVAL = 30000;
   const ADS_INTERVAL = 5000;
