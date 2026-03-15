@@ -11,7 +11,7 @@
 (function () {
   'use strict';
 
-  console.log("[Loader] 📦Скрипт загружен из GitHub  Эвент окончен v3.2.1" );
+  console.log("[Loader] 📦Скрипт загружен из GitHub  Эвент окончен v3.2.2" );
   
   const CHECK_REWARD_INTERVAL = 30000;
   const ADS_INTERVAL = 5000;
@@ -101,7 +101,7 @@
   }
 
   function isEventCompleted() {
-    //Эвент закончен, вернуть когда начнется опять
+
     const eventBlock = document.querySelector('.user-quest__item--event .user-quest__text');
     const text = eventBlock?.textContent.replace(/\s+/g, ' ').trim() || '';
     const m = text.match(/Event\s+(\d+)\s+из\s+(\d+)/i);
