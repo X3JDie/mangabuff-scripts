@@ -102,35 +102,35 @@
 
   function isEventCompleted() {
     //Эвент закончен, вернуть когда начнется опять
-    // const eventBlock = document.querySelector('.user-quest__item--event .user-quest__text');
-    // const text = eventBlock?.textContent.replace(/\s+/g, ' ').trim() || '';
-    // const m = text.match(/Event\s+(\d+)\s+из\s+(\d+)/i);
-    // if (!m) return false;
-    // return +m[1] >= +m[2];
+    const eventBlock = document.querySelector('.user-quest__item--event .user-quest__text');
+    const text = eventBlock?.textContent.replace(/\s+/g, ' ').trim() || '';
+    const m = text.match(/Event\s+(\d+)\s+из\s+(\d+)/i);
+    if (!m) return false;
+    return +m[1] >= +m[2];
     return true;
   }
 
   
 function proceedEventCheck() {
-  // if (!isEventCompleted()) {
-  //   clickEventButton();
-  // } else {
-  //   if (!localStorage.getItem("event_reload_done")) {
-  //     localStorage.setItem("event_reload_done", "true");
-  //     location.reload();
-  //   } else {
-  //     console.log("[Loader] Эвент собран, reload уже был");
-  //   }
-  // }
+  if (!isEventCompleted()) {
+    clickEventButton();
+  } else {
+    if (!localStorage.getItem("event_reload_done")) {
+      localStorage.setItem("event_reload_done", "true");
+      location.reload();
+    } else {
+      console.log("[Loader] Эвент собран, reload уже был");
+    }
+  }
 }
 
   
   function clickEventButton() {
-    // const btn = findQuestButton('event');
-    // if (btn) {
-    //   btn.click();
-    //   showPopup('Event');
-    // }
+    const btn = findQuestButton('event');
+    if (btn) {
+      btn.click();
+      showPopup('Event');
+    }
   }
   
   function getReadChapters() {
@@ -420,8 +420,8 @@ if (window.location.pathname.startsWith("/balance")) {
   setTimeout(() => {
     ensureChaptersThenEvent();
 
-   // if (isEventCompleted() && getReadChapters() >= 10) {
-      if (getReadChapters() >= 10) {
+   if (isEventCompleted() && getReadChapters() >= 10) {
+      // if (getReadChapters() >= 10) {
       setInterval(checkReward, CHECK_REWARD_INTERVAL);
       setInterval(clickAds, ADS_INTERVAL);
       setInterval(mineLoop, MINE_INTERVAL);
