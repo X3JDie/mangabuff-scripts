@@ -177,6 +177,7 @@ function ensureChaptersThenEvent() {
     location.reload();
   } else {
     console.log("[Loader] Главы >= 10, reload уже был");
+    clickEventButton();
   }
 }
 
@@ -421,6 +422,7 @@ if (window.location.pathname.startsWith("/balance")) {
     ensureChaptersThenEvent();
 
    if (isEventCompleted() && getReadChapters() >= 10) {
+      proceedEventCheck();
       // if (getReadChapters() >= 10) {
       setInterval(checkReward, CHECK_REWARD_INTERVAL);
       setInterval(clickAds, ADS_INTERVAL);
