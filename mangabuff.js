@@ -11,7 +11,7 @@
 (function () {
   'use strict';
 
-  console.log("[Loader] 📦Скрипт загружен из GitHub  Эвент окончен v3.2.3" );
+  console.log("[Loader] 📦Скрипт загружен из GitHub  Эвент окончен v3.2.4" );
   
   const CHECK_REWARD_INTERVAL = 30000;
   const ADS_INTERVAL = 5000;
@@ -100,15 +100,25 @@
     return isVisible(btn) ? btn : null;
   }
 
-  function isEventCompleted() {
+function isEventCompleted() {
+  const eventBlock = document.querySelector('.user-quest__item--event .user-quest__text');
+  const text = eventBlock?.textContent.replace(/\s+/g, ' ').trim() || '';
+  const m = text.match(/Event\s+(\d+)\s+из\s+(\d+)/i);
+  if (!m) return false;
 
-    const eventBlock = document.querySelector('.user-quest__item--event .user-quest__text');
-    const text = eventBlock?.textContent.replace(/\s+/g, ' ').trim() || '';
-    const m = text.match(/Event\s+(\d+)\s+из\s+(\d+)/i);
-    if (!m) return false;
-    return +m[1] >= +m[2];
-    return true;
+  const current = +m[1];
+  const total = +m[2];
+
+  if (current >= 35) {
+    if (!localStorage.getItem("event35_reload_done")) {
+      localStorage.setItem("event35_reload_done", "true");
+      location.reload();
+      return true;
+    }
   }
+
+  return current >= total;
+}
 
   
 function proceedEventCheck() {
