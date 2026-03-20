@@ -11,7 +11,7 @@
 (function () {
   'use strict';
 
-  console.log("[Loader] 📦Скрипт загружен из GitHub  Эвент окончен v3.2.4" );
+  console.log("[Loader] 📦Скрипт загружен из GitHub  Эвент окончен v3.2.5" );
   
   const CHECK_REWARD_INTERVAL = 30000;
   const ADS_INTERVAL = 5000;
@@ -431,9 +431,9 @@ if (window.location.pathname.startsWith("/balance")) {
   setTimeout(() => {
     ensureChaptersThenEvent();
 
-   if (isEventCompleted() && getReadChapters() >= 10) {
-      proceedEventCheck();
-      // if (getReadChapters() >= 10) {
+   //if (isEventCompleted() && getReadChapters() >= 10) {
+     // proceedEventCheck();
+      if (getReadChapters() >= 10) {
       setInterval(checkReward, CHECK_REWARD_INTERVAL);
       setInterval(clickAds, ADS_INTERVAL);
       setInterval(mineLoop, MINE_INTERVAL);
