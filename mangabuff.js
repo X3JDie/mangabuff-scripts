@@ -3,7 +3,9 @@
 // @namespace    http://tampermonkey.net/
 // @version      1.0
 // @description  Подключает основной скрипт из локального файла
-// @match        https://mangabuff.ru/*
+// @match        https://mangabuff.ru/balance 
+// @match        https://mangabuff.ru/quiz
+// @match        https://mangabuff.ru/mine
 // @grant        none
 // @require
 // ==/UserScript==
