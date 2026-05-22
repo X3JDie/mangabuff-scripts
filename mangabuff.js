@@ -13,11 +13,11 @@
 (function () {
   'use strict';
 
-  console.log("[Loader] 📦Скрипт загружен из GitHub  Эвент окончен v3.2.5" );
+  console.log("[Loader] 📦Скрипт загружен из GitHub  Эвент окончен v3.2.6 new time" );
   
   const CHECK_REWARD_INTERVAL = 30000;
   const ADS_INTERVAL = 5000;
-  const MINE_INTERVAL = 2000;
+  const MINE_INTERVAL = 4000;
   const MINE_LIMIT = 120;
   const RELOAD_DELAY_MS = 1500;
   const TRIGGER_MINUTES = 19;
@@ -456,7 +456,7 @@ if (window.location.pathname.startsWith("/balance")) {
         }
       }, 2000);
     }
-  }, 3000);
+  }, 6000);
 }
   
 if (window.location.pathname.startsWith("/auctions") || window.location.pathname.startsWith("/rating")) {
