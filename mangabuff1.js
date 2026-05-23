@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MangaBuff Loader
 // @namespace    http://tampermonkey.net/
-// @version      1.2
+// @version      1.3
 // @description  Адаптирован под balance-stats v2.1 (.wallet-panel__drop)
 // @match        https://mangabuff.ru/balance
 // @match        https://mangabuff.ru/quiz
@@ -11,7 +11,7 @@
 // ==/UserScript==
 (function () {
 'use strict';
-console.log("[Loader] 📦 Скрипт загружен и адаптирован под balance-stats v2.1");
+console.log("[Loader] 📦 Скрипт загружен и адаптирован под balance-stats v1.3");
 
 const CHECK_REWARD_INTERVAL = 30000;
 const ADS_INTERVAL = 5000;
