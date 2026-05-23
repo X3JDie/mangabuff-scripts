@@ -18,7 +18,11 @@ const ADS_INTERVAL = 5000;
 const MINE_INTERVAL = 4000;
 const MINE_LIMIT = 120;
 const RELOAD_DELAY_MS = 1500;
+ 
 const TRIGGER_MINUTES = 19;
+const AGGRESSIVE_TRIGGER_MINUTES = 60;
+const AGGRESSIVE_RETRY_MS = 20000;  
+
 const COMMENT_CHECK_INTERVAL = 300000;
 const COMMENT_MIN_DELAY = 1800000;
 const COMMENT_MAX_DELAY = 3600000;
@@ -233,29 +237,95 @@ function startCardSpamIfNeeded() {
 }
 
 function stopCardSpam() {
-    if (cardSpamInterval) { clearInterval(cardSpamInterval); cardSpamInterval = null; }
+    if (cardSpamInterval) { 
+        clearInterval(cardSpamInterval); 
+        cardSpamInterval = null; 
+    }
+   
+    if (aggressiveRewardInterval) {
+        clearInterval(aggressiveRewardInterval);
+        aggressiveRewardInterval = null;
+    }
 }
 
 function checkReward() {
     const cardsToday = getTodayCounts().cards;
     const chaptersDone = getReadChapters();
-    if (chaptersDone >= 75) {
-        if (cardsToday >= 10) { stopCardSpam(); return; }
-        startCardSpamIfNeeded(); return;
+    
+    // 🛑 Если 10 карт собрано — останавливаем ВСЕ режимы
+    if (cardsToday >= 10) {
+        stopCardSpam();
+        if (aggressiveRewardInterval) {
+            clearInterval(aggressiveRewardInterval);
+            aggressiveRewardInterval = null;
+        }
+        return;
     }
-    if (cardsToday >= 10) { stopCardSpam(); return; }
+    
+    // 🎯 Если прочитано >=75 глав — работает кард-спам (отдельная логика)
+    if (chaptersDone >= 75) {
+        startCardSpamIfNeeded();
+        return;
+    }
 
-    // 🔽 Ищем время последней награды в новом контейнере или в localStorage
-    const rewardTimeEl = document.querySelector('.reward-time');
+    // 🔍 Определяем время с последней награды
+    const rewardTimeEl = document.querySelector('.read_rewards_container .reward-time');
     let minutes = null;
-    if (rewardTimeEl && /Последняя награда/i.test(rewardTimeEl.textContent)) {
-        minutes = parseTime(rewardTimeEl.textContent.replace('Последняя награда:', '').trim());
+    
+    if (rewardTimeEl && /Последняя награда:/i.test(rewardTimeEl.textContent)) {
+        const timeText = rewardTimeEl.textContent.replace('Последняя награда:', '').trim();
+        minutes = parseTime(timeText);
     } else {
         const lastRewardTime = getLastRewardTimeFromStorage();
-        if (typeof lastRewardTime === 'number') minutes = (Date.now() - lastRewardTime) / (60 * 1000);
+        if (typeof lastRewardTime === 'number') {
+            minutes = (Date.now() - lastRewardTime) / (60 * 1000);
+        }
     }
 
-    if (minutes !== null && minutes >= TRIGGER_MINUTES && Date.now() - lastRewardClick > 10 * 60 * 1000) {
+    if (minutes === null) return;
+
+    // 🚀 АГРЕССИВНЫЙ РЕЖИМ: если прошло ≥60 мин и награда не получена
+    if (minutes >= AGGRESSIVE_TRIGGER_MINUTES && !aggressiveRewardInterval) {
+        console.log(`[Loader] ⚡ Агрессивный режим: прошло ${minutes} мин, начинаю сбор каждые 20 сек`);
+        
+        aggressiveRewardInterval = setInterval(() => {
+            const currentCards = getTodayCounts().cards;
+            
+            // ✅ Условие остановки 1: карта получена
+            if (currentCards > cardsToday || currentCards >= 10) {
+                console.log('[Loader] ✅ Награда получена, выход из агрессивного режима');
+                clearInterval(aggressiveRewardInterval);
+                aggressiveRewardInterval = null;
+                return;
+            }
+            
+            // ✅ Условие остановки 2: таймер сбросился (< 5 мин)
+            const currentEl = document.querySelector('.read_rewards_container .reward-time');
+            if (currentEl) {
+                const curText = currentEl.textContent.replace('Последняя награда:', '').trim();
+                const curMin = parseTime(curText);
+                if (curMin !== null && curMin < 5) {
+                    console.log('[Loader] ✅ Таймер сбросился, выход из агрессивного режима');
+                    clearInterval(aggressiveRewardInterval);
+                    aggressiveRewardInterval = null;
+                    return;
+                }
+            }
+            
+            // 🔄 Ещё не получили — кликаем снова
+            clickReward();
+            
+        }, AGGRESSIVE_RETRY_MS);
+        
+        // Первый клик сразу при входе в режим
+        clickReward();
+        return; // чтобы не сработал обычный клик ниже
+    }
+
+    // 🟢 ОБЫЧНЫЙ РЕЖИМ: клик раз в ~19 минут (только если не в агрессивном)
+    if (minutes >= TRIGGER_MINUTES && 
+        Date.now() - lastRewardClick > 10 * 60 * 1000 && 
+        !aggressiveRewardInterval) {
         clickReward();
     }
 }
