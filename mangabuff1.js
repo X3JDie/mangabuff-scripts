@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MangaBuff Loader
 // @namespace    http://tampermonkey.net/
-// @version      1.3
+// @version      1.3.1
 // @description  Адаптирован под balance-stats v2.1 (.wallet-panel__drop)
 // @match        https://mangabuff.ru/balance
 // @match        https://mangabuff.ru/quiz
@@ -11,7 +11,7 @@
 // ==/UserScript==
 (function () {
 'use strict';
-console.log("[Loader] 📦 Скрипт загружен и адаптирован под balance-stats v1.3");
+console.log("[Loader] 📦 Скрипт загружен и адаптирован под balance-stats v1.3.1");
 
 const CHECK_REWARD_INTERVAL = 30000;
 const ADS_INTERVAL = 5000;
@@ -29,6 +29,7 @@ const COMMENT_MAX_DELAY = 3600000;
 
 let lastRewardClick = 0;
 let cardSpamInterval = null;
+let aggressiveRewardInterval = null; 
 
 const COMMENT_POOL = [
  "Привет всем ", "Всем привет, как настроение? ", "Добрый день, друзья! ",
