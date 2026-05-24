@@ -27,7 +27,7 @@ const AGGRESSIVE_RETRY_MS = 20000;
 const COMMENT_CHECK_INTERVAL = 300000;
 const COMMENT_MIN_DELAY = 1800000;
 const COMMENT_MAX_DELAY = 3600000;
-const COMMENT_BATCH_DELAY = 5000; 
+const COMMENT_BATCH_DELAY = 10000; 
 
 let lastRewardClick = 0;
 let cardSpamInterval = null;
