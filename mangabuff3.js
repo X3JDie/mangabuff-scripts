@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         MangaBuff Loader
 // @namespace    http://tampermonkey.net/
-// @version      1.4.0
-// @description  Авто-сбор квестов: чтение, реклама, шахта, битва, награды + сбор на /battle
+// @version      1.5.0
+// @description  Авто-сбор квестов + анти-детект: рандомные задержки, человеческое поведение
 // @match        https://mangabuff.ru/balance
 // @match        https://mangabuff.ru/quiz
 // @match        https://mangabuff.ru/mine
@@ -13,12 +13,20 @@
 
 (function () {
 'use strict';
-console.log("[Loader] 📦 Скрипт загружен, версия 1.4.0");
+console.log("[Loader] 📦 Скрипт загружен, версия 1.5.0");
+
+// === НАСТРОЙКИ АНТИ-ДЕТЕКТА ===
+const HUMAN_MODE = true;
+const MIN_DELAY = 800;
+const MAX_DELAY = 3500;
+const IDLE_CHANCE = 0.15;
+const SCROLL_CHANCE = 0.2;
 
 const CHECK_REWARD_INTERVAL = 30000;
 const ADS_INTERVAL = 5000;
 const MINE_INTERVAL = 4000;
 const BATTLE_INTERVAL = 3000;
+const COMMENTS_INTERVAL = 7000;
 const RELOAD_DELAY_MS = 1500;
  
 const TRIGGER_MINUTES = 19;
@@ -28,6 +36,49 @@ const AGGRESSIVE_RETRY_MS = 20000;
 let lastRewardClick = 0;
 let cardSpamInterval = null;
 let aggressiveRewardInterval = null; 
+let victoryCount = 0;
+const VICTORY_TARGET = 10;
+
+function randomInt(min, max) {
+    return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+function humanDelay(min = MIN_DELAY, max = MAX_DELAY) {
+    if (!HUMAN_MODE) return min;
+    if (Math.random() < IDLE_CHANCE) return randomInt(3000, 8000);
+    return randomInt(min, max);
+}
+
+function jitter(base, percent = 0.3) {
+    if (!HUMAN_MODE) return base;
+    const variation = base * percent * (Math.random() * 2 - 1);
+    return Math.max(500, base + variation);
+}
+
+function simulateHumanClick(el) {
+    if (!el || !isVisible(el)) return false;
+    
+    if (HUMAN_MODE && Math.random() < SCROLL_CHANCE) {
+        window.scrollBy({ top: randomInt(-50, 100), behavior: 'smooth' });
+    }
+    
+    setTimeout(() => {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, humanDelay(200, 600));
+    
+    setTimeout(() => {
+        if (isVisible(el)) {
+            el.click();
+            if (HUMAN_MODE && Math.random() < 0.4) {
+                document.body.dispatchEvent(new MouseEvent('mousemove', {
+                    clientX: randomInt(100, 800),
+                    clientY: randomInt(100, 600)
+                }));
+            }
+        }
+    }, humanDelay(400, 1200));
+    return true;
+}
 
 function getTodayKey() { return new Date().toLocaleDateString('ru-RU'); }
 
@@ -117,7 +168,11 @@ function getReadRewardsCooldown() {
 
 function clickReward() {
     const btn = findQuestButton('read_rewards');
-    if (btn) { btn.click(); lastRewardClick = Date.now(); showPopup('🎁 Награда'); }
+    if (btn) { 
+        simulateHumanClick(btn); 
+        lastRewardClick = Date.now(); 
+        showPopup('🎁 Награда'); 
+    }
 }
 
 function startCardSpamIfNeeded() {
@@ -133,7 +188,7 @@ function startCardSpamIfNeeded() {
                 const lc = getLastCardTime();
                 const mins = lc ? (Date.now() - lc) / (60 * 1000) : 999;
                 if (mins >= 60) clickReward();
-            }, 60000);
+            }, jitter(60000, 0.4));
         }
     }
 }
@@ -177,7 +232,7 @@ function checkReward() {
                 }
             }
             clickReward();
-        }, AGGRESSIVE_RETRY_MS);
+        }, jitter(AGGRESSIVE_RETRY_MS, 0.35));
         clickReward();
         return;
     }
@@ -195,7 +250,7 @@ function getReadChapters() {
 
 function clickReadButton() {
     const btn = findQuestButton('read');
-    if (btn) { btn.click(); showPopup('📚 Глава'); }
+    if (btn) { simulateHumanClick(btn); showPopup('📚 Глава'); }
 }
 
 function ensureChaptersThenEvent() {
@@ -203,13 +258,13 @@ function ensureChaptersThenEvent() {
     if (chapters < 75) {
         clickReadButton();
         const interval = setInterval(() => {
-            if (getReadChapters() >= 75) { clearInterval(interval); location.reload(); }
-        }, 5000);
+            if (getReadChapters() >= 75) { clearInterval(interval); setTimeout(() => location.reload(), humanDelay()); }
+        }, jitter(5000, 0.3));
         return;
     }
     if (!localStorage.getItem("chapters_reload_done")) {
         localStorage.setItem("chapters_reload_done", "true");
-        location.reload();
+        setTimeout(() => location.reload(), humanDelay());
     } else {
         clickEventButton();
     }
@@ -220,7 +275,7 @@ function isEventCompleted() {
     const prog = parseProgress(block?.textContent);
     if (prog.current >= 35 && !localStorage.getItem("event35_reload_done")) {
         localStorage.setItem("event35_reload_done", "true");
-        location.reload();
+        setTimeout(() => location.reload(), humanDelay());
         return true;
     }
     return prog.done;
@@ -228,14 +283,14 @@ function isEventCompleted() {
 
 function clickEventButton() {
     const btn = findQuestButton('event');
-    if (btn) { btn.click(); showPopup('🎪 Event'); }
+    if (btn) { simulateHumanClick(btn); showPopup('🎪 Event'); }
 }
 
 function proceedEventCheck() {
     if (!isEventCompleted()) { clickEventButton(); } 
     else if (!localStorage.getItem("event_reload_done")) {
         localStorage.setItem("event_reload_done", "true");
-        location.reload();
+        setTimeout(() => location.reload(), humanDelay());
     }
 }
 
@@ -244,7 +299,7 @@ function clickAds() {
     const prog = parseProgress(block?.textContent);
     if (!prog.done) {
         const btn = findQuestButton('watch_ads');
-        if (btn) { btn.click(); showPopup('📺 Реклама'); }
+        if (btn) { simulateHumanClick(btn); showPopup('📺 Реклама'); }
     }
 }
 
@@ -253,7 +308,16 @@ function mineLoop() {
     const prog = parseProgress(block?.textContent);
     if (!prog.done && prog.current < 125) {
         const btn = findQuestButton('mine');
-        if (btn) { btn.click(); showPopup('⛏️ Шахта'); }
+        if (btn) { simulateHumanClick(btn); showPopup('⛏️ Шахта'); }
+    }
+}
+
+function clickComments() {
+    const block = document.querySelector('.wallet-panel__drop--comments .wallet-panel__drop-text');
+    const prog = parseProgress(block?.textContent);
+    if (!prog.done) {
+        const btn = findQuestButton('comments');
+        if (btn) { simulateHumanClick(btn); showPopup('💬 Коменты'); }
     }
 }
 
@@ -264,7 +328,7 @@ function clickChatDiamond() {
     
     const btn = findQuestButton('chat_diamond');
     if (btn) {
-        btn.click();
+        simulateHumanClick(btn);
         showPopup('💎 Алмаз');
         setTimeout(() => location.reload(), RELOAD_DELAY_MS);
     }
@@ -272,7 +336,7 @@ function clickChatDiamond() {
 
 function scheduleChatDiamond() {
     const delay = (15 * 60 + Math.floor(Math.random() * 10)) * 1000;
-    setTimeout(() => { clickChatDiamond(); scheduleChatDiamond(); }, delay);
+    setTimeout(() => { clickChatDiamond(); scheduleChatDiamond(); }, jitter(delay, 0.2));
 }
 
 function getBattleProgress() {
@@ -282,7 +346,7 @@ function getBattleProgress() {
 
 function clickBattleButton() {
     const btn = findQuestButton('battle');
-    if (btn) { btn.click(); showPopup('⚔️ Битва'); }
+    if (btn) { simulateHumanClick(btn); showPopup('⚔️ Битва'); }
 }
 
 function battleLoop() {
@@ -292,12 +356,12 @@ function battleLoop() {
         setTimeout(() => {
             const newProg = getBattleProgress();
             if (!newProg.done) {
-                setTimeout(battleLoop, BATTLE_INTERVAL);
+                setTimeout(battleLoop, jitter(BATTLE_INTERVAL, 0.4));
             } else {
                 showPopup('⚔️ Сбор наград...');
-                setTimeout(() => { window.location.href = '/battle'; }, 1500);
+                setTimeout(() => { window.location.href = '/battle'; }, humanDelay(1000, 2500));
             }
-        }, 2000);
+        }, humanDelay(1500, 3000));
     }
 }
 
@@ -318,10 +382,10 @@ function collectBattleRewards() {
             button.scrollIntoView({ behavior: 'smooth', block: 'center' });
             setTimeout(() => {
                 if (!button.disabled) {
-                    button.click();
+                    simulateHumanClick(button);
                     showPopup('🏆 +награда');
                 }
-            }, 300 + Math.random() * 500);
+            }, humanDelay(300, 800));
             collected++;
             if (collected >= 4) break;
         }
@@ -345,11 +409,34 @@ function clickUpdateDayButton() {
     const buttons = document.querySelectorAll("button.button");
     for (const btn of buttons) {
         if (btn.textContent.includes("Обновить статистику за день")) {
-            btn.click();
+            simulateHumanClick(btn);
             return true;
         }
     }
     return false;
+}
+
+function observeVictories() {
+    const observer = new MutationObserver(mutations => {
+        for (let mutation of mutations) {
+            if (mutation.type === 'childList') {
+                const toasts = document.querySelectorAll('#toast-container .toast-message');
+                toasts.forEach(toast => {
+                    if (toast.textContent.includes('Победа!') && !toast.dataset.counted) {
+                        toast.dataset.counted = 'true';
+                        victoryCount++;
+                        showPopup(`⚔️ Побед: ${victoryCount}/${VICTORY_TARGET}`);
+                        if (victoryCount >= VICTORY_TARGET) {
+                            victoryCount = 0;
+                            showPopup('🏆 10 побед! Забираем награды...');
+                            setTimeout(() => { window.location.href = '/battle'; }, humanDelay(1000, 2500));
+                        }
+                    }
+                });
+            }
+        }
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
 }
 
 if (window.location.pathname.startsWith("/quiz")) {
@@ -366,14 +453,19 @@ if (window.location.pathname.startsWith("/quiz")) {
         for (let mutation of mutations) {
             if (mutation.type === 'childList') {
                 const items = document.querySelectorAll('.quiz__answer-item');
-                if (clickCount === 0 && items.length > 0 && !answer) { items[0].click(); clickCount++; return; }
+                if (clickCount === 0 && items.length > 0 && !answer) { 
+                    simulateHumanClick(items[0]); 
+                    clickCount++; 
+                    return; 
+                }
                 items.forEach(item => {
                     if (answer && item.innerText.trim() === answer.trim()) {
                         if (clickCount < MAX_CLICKS) {
                             setTimeout(() => {
-                                item.click(); clickCount++;
+                                simulateHumanClick(item); 
+                                clickCount++;
                                 if (clickCount >= MAX_CLICKS) window.location.href = "/balance";
-                            }, 5000);
+                            }, humanDelay(3000, 7000));
                         }
                     }
                 });
@@ -388,24 +480,26 @@ if (window.location.pathname.startsWith("/balance")) {
     setTimeout(() => {
         ensureChaptersThenEvent();
         if (getReadChapters() >= 10) {
-            setInterval(checkReward, CHECK_REWARD_INTERVAL);
-            setInterval(clickAds, ADS_INTERVAL);
-            setInterval(mineLoop, MINE_INTERVAL);
+            observeVictories();
+            setInterval(checkReward, jitter(CHECK_REWARD_INTERVAL, 0.35));
+            setInterval(clickAds, jitter(ADS_INTERVAL, 0.4));
+            setInterval(mineLoop, jitter(MINE_INTERVAL, 0.35));
+            setInterval(clickComments, jitter(COMMENTS_INTERVAL, 0.4));
             scheduleChatDiamond();
             
             if (document.querySelector('.wallet-panel__drop--battle')) {
-                setTimeout(battleLoop, 5000);
+                setTimeout(battleLoop, humanDelay(3000, 8000));
             }
             
             setTimeout(() => {
                 if (clickUpdateDayButton()) {
-                    setTimeout(() => { if (!hasQuizToday()) window.location.href = "/quiz"; }, 5000 + Math.floor(Math.random() * 5000));
+                    setTimeout(() => { if (!hasQuizToday()) window.location.href = "/quiz"; }, humanDelay(5000, 10000));
                 } else {
                     if (!hasQuizToday()) window.location.href = "/quiz";
                 }
-            }, 2000);
+            }, humanDelay(1500, 4000));
         }
-    }, 6000);
+    }, humanDelay(4000, 9000));
 }
 
 if (window.location.pathname.startsWith("/battle")) {
@@ -416,8 +510,8 @@ if (window.location.pathname.startsWith("/battle")) {
             if (collected === 0) {
                 clearInterval(battleCollectInterval);
             }
-        }, 8000);
-    }, 3000);
+        }, jitter(8000, 0.3));
+    }, humanDelay(2000, 5000));
 }
 
 })();
