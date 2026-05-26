@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         MangaBuff Loader
 // @namespace    http://tampermonkey.net/
-// @version      1.6.0
-// @description  Авто-сбор квестов: последовательное выполнение + анти-детект + счетчик побед
+// @version      1.7.0
+// @description  Авто-сбор квестов: последовательное выполнение + внутренний счетчик побед + анти-детект
 // @match        https://mangabuff.ru/balance
 // @match        https://mangabuff.ru/quiz
 // @match        https://mangabuff.ru/mine
@@ -13,14 +13,12 @@
 
 (function () {
 'use strict';
-console.log("[Loader] 📦 Скрипт загружен, версия 1.6.0");
 
 const HUMAN_MODE = true;
 const MIN_DELAY = 800;
 const MAX_DELAY = 3500;
 const IDLE_CHANCE = 0.15;
 const SCROLL_CHANCE = 0.2;
-
 const CHECK_REWARD_INTERVAL = 30000;
 const RELOAD_DELAY_MS = 1500;
 const TRIGGER_MINUTES = 19;
@@ -40,7 +38,8 @@ const TASK_SELECTORS = {
 let lastRewardClick = 0;
 let cardSpamInterval = null;
 let aggressiveRewardInterval = null; 
-let victoryCount = 0;
+let victoryCount = parseInt(localStorage.getItem('mb_battle_wins') || '0');
+let lastBattleDay = localStorage.getItem('mb_battle_day') || '';
 let seqRunning = false;
 
 function randomInt(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
@@ -249,21 +248,57 @@ function scheduleChatDiamond() {
     setTimeout(() => { clickChatDiamond(); scheduleChatDiamond(); }, jitter(delay, 0.2));
 }
 
-function runSequentialTasks() {
-    if (seqRunning) return;
+function dailyResetCheck() {
     const today = getTodayKey();
-    if (localStorage.getItem('seq_day') !== today) {
+    const block = document.querySelector('.wallet-panel__drop--comments .wallet-panel__drop-text');
+    const prog = block ? parseProgress(block.textContent) : null;
+    if (prog && prog.current === 0 && lastBattleDay !== today) {
+        localStorage.setItem('mb_battle_day', today);
+        localStorage.setItem('mb_battle_wins', '0');
         localStorage.setItem('seq_day', today);
         localStorage.setItem('seq_index', '0');
         localStorage.removeItem('battles_seq_started');
+        victoryCount = 0;
+        showPopup('🔄 Новый день! Сброс счетчиков.');
     }
+}
+
+function startBattleInternalLoop() {
+    if (victoryCount >= VICTORY_TARGET) {
+        showPopup('🏆 Лимит побед достигнут. Ожидание нового дня...');
+        return;
+    }
+
+    const btn = findQuestButton('battle');
+    if (!btn) {
+        setTimeout(startBattleInternalLoop, 3000);
+        return;
+    }
+
+    simulateHumanClick(btn);
+    showPopup(`⚔️ Битва ${victoryCount + 1}/${VICTORY_TARGET}`);
+
+    setTimeout(() => {
+        victoryCount++;
+        localStorage.setItem('mb_battle_wins', String(victoryCount));
+
+        if (victoryCount >= VICTORY_TARGET) {
+            showPopup('🏆 10 побед! Идем забирать награды...');
+            setTimeout(() => window.location.href = '/battle', humanDelay(1000, 2500));
+        } else {
+            setTimeout(startBattleInternalLoop, jitter(3000, 0.5));
+        }
+    }, humanDelay(1500, 3000));
+}
+
+function runSequentialTasks() {
+    if (seqRunning) return;
+    dailyResetCheck();
 
     let idx = parseInt(localStorage.getItem('seq_index') || '0');
     if (idx >= SEQUENCE_TASKS.length) {
-        if (document.querySelector('.wallet-panel__drop--battle') && !localStorage.getItem('battles_seq_started')) {
-            localStorage.setItem('battles_seq_started', today);
-            setTimeout(battleLoop, humanDelay(1500, 4000));
-        }
+        if (victoryCount < VICTORY_TARGET) startBattleInternalLoop();
+        else showPopup('✅ Все задачи выполнены до нового дня.');
         return;
     }
 
@@ -311,28 +346,6 @@ function runSequentialTasks() {
     }, jitter(2000, 0.3));
 }
 
-function getBattleProgress() {
-    const block = document.querySelector('.wallet-panel__drop--battle .wallet-panel__drop-text');
-    return parseProgress(block?.textContent);
-}
-
-function clickBattleButton() {
-    const btn = findQuestButton('battle');
-    if (btn) { simulateHumanClick(btn); showPopup('⚔️ Битва'); }
-}
-
-function battleLoop() {
-    const prog = getBattleProgress();
-    if (!prog.done) {
-        clickBattleButton();
-        setTimeout(() => {
-            const newProg = getBattleProgress();
-            if (!newProg.done) setTimeout(battleLoop, jitter(3000, 0.4));
-            else { showPopup('⚔️ Сбор наград...'); setTimeout(() => { window.location.href = '/battle'; }, humanDelay(1000, 2500)); }
-        }, humanDelay(1500, 3000));
-    }
-}
-
 function collectBattleRewards() {
     const articles = document.querySelectorAll('article[data-daily-quest]');
     if (!articles.length) return 0;
@@ -359,28 +372,6 @@ function clickUpdateDayButton() {
     return false;
 }
 
-function observeVictories() {
-    const observer = new MutationObserver(mutations => {
-        for (let mutation of mutations) {
-            if (mutation.type === 'childList') {
-                document.querySelectorAll('#toast-container .toast-message').forEach(toast => {
-                    if (toast.textContent.includes('Победа!') && !toast.dataset.counted) {
-                        toast.dataset.counted = 'true';
-                        victoryCount++;
-                        showPopup(`⚔️ Побед: ${victoryCount}/${VICTORY_TARGET}`);
-                        if (victoryCount >= VICTORY_TARGET) {
-                            victoryCount = 0;
-                            showPopup('🏆 10 побед! Забираем награды...');
-                            setTimeout(() => { window.location.href = '/battle'; }, humanDelay(1000, 2500));
-                        }
-                    }
-                });
-            }
-        }
-    });
-    observer.observe(document.body, { childList: true, subtree: true });
-}
-
 if (window.location.pathname.startsWith("/quiz")) {
     let answer = "", clickCount = 0;
     const MAX_CLICKS = 11;
@@ -404,9 +395,9 @@ if (window.location.pathname.startsWith("/quiz")) {
 
 if (window.location.pathname.startsWith("/balance")) {
     setTimeout(() => {
+        dailyResetCheck();
         ensureChaptersThenEvent();
         if (getReadChapters() >= 10) {
-            observeVictories();
             setInterval(checkReward, jitter(CHECK_REWARD_INTERVAL, 0.35));
             scheduleChatDiamond();
             setTimeout(runSequentialTasks, humanDelay(2000, 5000));
@@ -417,8 +408,8 @@ if (window.location.pathname.startsWith("/balance")) {
 if (window.location.pathname.startsWith("/battle")) {
     setTimeout(() => {
         collectBattleRewards();
-        const battleCollectInterval = setInterval(() => { if (collectBattleRewards() === 0) clearInterval(battleCollectInterval); }, jitter(8000, 0.3));
-    }, humanDelay(2000, 5000));
+        setTimeout(() => window.location.href = '/balance', humanDelay(3000, 6000));
+    }, humanDelay(2000, 4000));
 }
 
 })();
