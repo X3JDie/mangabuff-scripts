@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         MangaBuff Sequential Loader v2.8 (No Reload Spam)
+// @name         MangaBuff Sequential Loader v2.9 (Optimized & No Spam)
 // @namespace    http://tampermonkey.net/
-// @version      2.8.0
-// @description  Обновляет данные кнопкой "Обновить статистику", а не перезагрузкой. Умный цикл комментов. Агрессия.
+// @version      2.9.0
+// @description  Оптимизирован: обновление статистики только после действий. Без спама кнопкой.
 // @match        https://mangabuff.ru/balance
 // @match        https://mangabuff.ru/quiz
 // @match        https://mangabuff.ru/mine
@@ -13,10 +13,10 @@
 
 (function () {
     'use strict';
-    console.log("[Loader v2.8] 🚀 Обновление через кнопку статистики. Без спама перезагрузками.");
+    console.log("[Loader v2.9]  Оптимизация: Обновление только по факту действий.");
 
     // --- КОНСТАНТЫ ---
-    const CHECK_INTERVAL = 5000; 
+    const CHECK_INTERVAL = 10000; // Увеличили до 10 сек, чтобы не грузить браузер
     const ACTION_DELAY_MIN = 2000;
     const ACTION_DELAY_MAX = 5000;
     
@@ -25,12 +25,13 @@
     const AGGRESSIVE_RETRY_MS = 15000; 
     
     // Комментарии
-    const COMMENT_CLICK_DELAY = 30000; // 30 секунд между кликами
+    const COMMENT_CLICK_DELAY = 30000; 
 
     // Флаги состояний
     let aggressiveInterval = null;
     let isCommentCycleActive = false;
-    let isUpdatingStats = false; // Флаг, чтобы не спамить кнопку обновления
+    let isUpdatingStats = false;
+    let lastActionTime = 0; // Время последнего действия, чтобы не спамить
 
     // --- УТИЛИТЫ ---
 
@@ -64,7 +65,6 @@
         return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
     }
 
-    // Поиск кнопки (приоритет Balance Stats)
     function findQuestButton(name) {
         let block = document.querySelector(`.wallet-panel__drop--${name}`);
         if (block) {
@@ -130,21 +130,22 @@
         }
     }
 
-    // --- ОБНОВЛЕНИЕ СТАТИСТИКИ БЕЗ РЕЛОАДА ---
+    // --- ОБНОВЛЕНИЕ СТАТИСТИКИ ---
     async function refreshStatsViaButton() {
         if (isUpdatingStats) return;
         
-        const btn = document.querySelector('button.button'); // Ищем кнопку по классу
-        // Более точный поиск, если есть текст
+        // Не обновляем слишком часто (защита от спама)
+        if (Date.now() - lastActionTime < 5000) return;
+
         const buttons = Array.from(document.querySelectorAll('button'));
         const targetBtn = buttons.find(b => b.textContent.includes("Обновить статистику за день"));
 
         if (targetBtn && isVisible(targetBtn)) {
             isUpdatingStats = true;
-            console.log("[Loader] Обновляю статистику через кнопку...");
+            lastActionTime = Date.now();
+            console.log("[Loader] Обновляю статистику...");
             targetBtn.click();
-            // Даем время на AJAX запрос и отрисовку
-            await sleep(3000); 
+            await sleep(3000); // Ждем завершения AJAX
             isUpdatingStats = false;
         }
     }
@@ -153,18 +154,17 @@
     function startAggressiveRewardCollection() {
         if (aggressiveInterval) return; 
 
-        console.log("[Loader] ⚡ Старт агрессивного сбора наград!");
+        console.log("[Loader] ⚡ Агрессивный сбор!");
         showPopup('Агрессивный сбор карт...');
 
         const btn = findQuestButton('read_rewards');
         if (btn) btn.click();
+        lastActionTime = Date.now();
 
         aggressiveInterval = setInterval(async () => {
             const cards = getTodayCardCount();
             if (cards >= 10) {
                 stopAggressiveMode();
-                // Здесь можно просто обновить статистику, но для надежности сброса таймера лучше реолоад
-                // Но попробуем без него сначала
                 await refreshStatsViaButton();
                 return;
             }
@@ -178,20 +178,24 @@
                 }
             }
             const btn = findQuestButton('read_rewards');
-            if (btn) btn.click();
-            else stopAggressiveMode();
+            if (btn) {
+                btn.click();
+                lastActionTime = Date.now();
+            } else {
+                stopAggressiveMode();
+            }
 
         }, AGGRESSIVE_RETRY_MS);
     }
 
     // --- ОСНОВНЫЕ ДЕЙСТВИЯ ---
 
-    // 1. Чтение и Агрессия
     async function handleReadingAndRewards() {
         const chapters = getReadChaptersCount();
         const cards = getTodayCardCount();
         const lastCardTime = getLastCardTime();
 
+        // Агрессия
         if (cards < 10) {
             let shouldAggress = false;
             if (lastCardTime) {
@@ -206,52 +210,43 @@
             }
         }
 
+        // Чтение до 75
         if (cards >= 10 && chapters < 75) {
-            console.log(`[Loader] Карты собраны. Читаем до 75: ${chapters}/75`);
+            console.log(`[Loader] Читаем до 75: ${chapters}/75`);
             const customReadBtn = document.querySelector('.wallet-panel__drop--read .wallet-panel__drop-icon');
             if (customReadBtn && isVisible(customReadBtn)) {
                  customReadBtn.click();
-                 showPopup('Читаем до 75...');
-                 // Ждем и обновляем статистику
+                 showPopup('Читаем...');
+                 lastActionTime = Date.now();
                  await sleep(5000);
                  await refreshStatsViaButton();
-            } else {
-                 const stdBtn = document.querySelector('.wallet-panel__action--read'); 
-                 if(stdBtn) stdBtn.click();
-                 await sleep(5000);
-                 location.reload(); // Если нет кастомной кнопки, возможно нужен реолоад
             }
             return;
         }
         
+        // Чтение до 10
         if (chapters < 10) {
              console.log(`[Loader] Чтение для старта: ${chapters}/10`);
              const customReadBtn = document.querySelector('.wallet-panel__drop--read .wallet-panel__drop-icon');
              if (customReadBtn && isVisible(customReadBtn)) {
                  customReadBtn.click();
                  showPopup('Читаем...');
+                 lastActionTime = Date.now();
                  await sleep(5000);
                  await refreshStatsViaButton();
-             } else {
-                 const stdBtn = document.querySelector('.wallet-panel__action--read');
-                 if(stdBtn) stdBtn.click();
-                 await sleep(5000);
-                 location.reload();
              }
         }
     }
 
-    // 2. Квиз
     async function handleQuiz() {
         if (hasQuizToday()) return true; 
-        console.log("[Loader] Идем на Квиз (1 карта).");
+        console.log("[Loader] Идем на Квиз.");
         showPopup('Переход на Квиз...');
         await sleep(randomDelay());
         window.location.href = "/quiz";
         return false;
     }
 
-    // 3. Реклама
     function clickAdsIfNeeded() {
         const btn = findQuestButton('watch_ads');
         if (btn) {
@@ -261,14 +256,15 @@
                 if (cur < max) {
                     btn.click();
                     showPopup('Реклама...');
+                    lastActionTime = Date.now();
                 }
             } else {
                 btn.click();
+                lastActionTime = Date.now();
             }
         }
     }
 
-    // 4. Шахта
     function handleMine() {
         const btn = findQuestButton('mine');
         if (btn) {
@@ -276,15 +272,15 @@
              if (text) {
                  const { cur, max } = parseProgress(text);
                  if (cur < max) {
-                     console.log(`[Loader] Шахта (2 карты): ${cur}/${max}.`);
+                     console.log(`[Loader] Шахта: ${cur}/${max}.`);
                      btn.click();
-                     showPopup('Запуск шахты...');
+                     showPopup('Шахта...');
+                     lastActionTime = Date.now();
                  }
              }
         }
     }
 
-    // 5. Комментарии (УМНЫЙ ЦИКЛ)
     function startCommentCycle() {
         if (isCommentCycleActive) return; 
         
@@ -292,14 +288,11 @@
         if (!text) return;
         
         const { cur, max } = parseProgress(text);
-        if (cur >= max) {
-            console.log("[Loader] Комментарии уже выполнены.");
-            return;
-        }
+        if (cur >= max) return;
 
         isCommentCycleActive = true;
-        console.log(`[Loader] Запуск цикла комментариев. Текущий: ${cur}, Цель: ${max}. Интервал: 30 сек.`);
-        showPopup(`Цикл комментов: ${cur}/${max}`);
+        console.log(`[Loader] Цикл комментов: ${cur}/${max}`);
+        showPopup(`Комменты: ${cur}/${max}`);
 
         const doCommentStep = async () => {
             const currentText = getProgressText('comments');
@@ -311,18 +304,19 @@
             const currentStatus = parseProgress(currentText);
             
             if (currentStatus.cur >= currentStatus.max) {
-                console.log("[Loader] Все комментарии написаны.");
-                showPopup('Комментарии готовы!');
+                console.log("[Loader] Комменты готовы.");
+                showPopup('Комменты готовы!');
                 isCommentCycleActive = false;
+                await refreshStatsViaButton(); // Обновим после завершения
                 return;
             }
 
             const btn = findQuestButton('comments');
             if (btn) {
-                console.log(`[Loader] Клик комментария (${currentStatus.cur + 1}/${currentStatus.max})...`);
+                console.log(`[Loader] Клик коммента (${currentStatus.cur + 1}/${currentStatus.max})...`);
                 btn.click();
+                lastActionTime = Date.now();
             } else {
-                console.error("[Loader] Кнопка комментариев не найдена!");
                 isCommentCycleActive = false;
                 return;
             }
@@ -333,21 +327,15 @@
         doCommentStep();
     }
 
-    // 6. Битва
     async function handleBattle() {
         const battleDoneFlag = localStorage.getItem('battle_done_today_v2');
-        if (battleDoneFlag === 'true') {
-            console.log("[Loader] Битва уже собрана.");
-            return;
-        }
+        if (battleDoneFlag === 'true') return;
 
-        console.log("[Loader] Идем в Битву (5 карт).");
-        showPopup('Проверка Битвы...');
+        console.log("[Loader] Идем в Битву.");
+        showPopup('Битва...');
         await sleep(randomDelay());
         window.location.href = "/battle";
     }
-
-    // --- ОБРАБОТЧИКИ СТРАНИЦ ---
 
     function processBattlePage() {
         let canClaim10 = false;
@@ -372,8 +360,8 @@
         });
 
         if (canClaim10 && canClaim6) {
-            console.log("[Battle] УСЛОВИЕ ВЫПОЛНЕНО! Сбор наград.");
-            showPopup('Сбор наград Битвы...');
+            console.log("[Battle] Сбор наград.");
+            showPopup('Сбор Битвы...');
             
             claimableButtons.forEach((btn, index) => {
                 setTimeout(() => btn.click(), index * 1000);
@@ -386,7 +374,6 @@
             }, claimableButtons.length * 1000 + 1000);
 
         } else {
-            console.log("[Battle] Условия не выполнены. Выход.");
             if (!window.battleCheckDone) {
                  window.battleCheckDone = true;
                  setTimeout(() => window.location.href = "/balance", 5000);
@@ -401,7 +388,7 @@
             if (btn) {
                 btn.click();
                 showPopup('Алмаз за чат');
-                // Здесь можно попробовать обновить статистику вместо реолоада
+                lastActionTime = Date.now();
                 setTimeout(() => refreshStatsViaButton(), 2000);
             }
             scheduleChatDiamond();
@@ -412,7 +399,7 @@
         const lastDate = localStorage.getItem('last_active_date_v2');
         const today = getTodayKey();
         if (lastDate !== today) {
-            console.log("[Loader] Новый день. Сброс.");
+            console.log("[Loader] Новый день.");
             localStorage.setItem('last_active_date_v2', today);
             localStorage.removeItem('battle_done_today_v2');
             window.battleCheckDone = false;
@@ -420,12 +407,9 @@
         }
     }
 
-    // --- ГЛАВНЫЙ ЦИКЛ BALANCE ---
-
     async function mainLoopOnBalance() {
         checkDayReset();
         
-        // 1. Чтение и Агрессия (Приоритет №1)
         await handleReadingAndRewards();
         
         if (aggressiveInterval) return;
@@ -433,17 +417,9 @@
         const cards = getTodayCardCount();
         const chapters = getReadChaptersCount();
 
-        // Периодически обновляем статистику, чтобы данные были свежими
-        // Но не чаще чем раз в 10 секунд
-        if (!isUpdatingStats && Math.random() > 0.7) {
-             await refreshStatsViaButton();
-        }
-
         console.log(`[Loader] Статус: Карт ${cards}/10, Глав ${chapters}/75`);
 
-        // 2. Строгая очередь квестов
-        
-        // ШАГ 1: 1 Карта -> Квиз + Реклама
+        // Очередь
         if (cards >= 1) {
             if (!hasQuizToday()) {
                 await handleQuiz();
@@ -452,17 +428,14 @@
             clickAdsIfNeeded();
         }
 
-        // ШАГ 2: 2 Карты -> Шахта
         if (cards >= 2) {
             handleMine();
         }
 
-        // ШАГ 3: 3 Карты -> ЗАПУСК ЦИКЛА КОММЕНТАРИЕВ
         if (cards >= 3) {
             startCommentCycle();
         }
 
-        // ШАГ 4: 5 Карт -> Битва
         if (cards >= 5) {
             if (!isCommentCycleActive) {
                 await handleBattle();
@@ -470,8 +443,6 @@
             }
         }
     }
-
-    // --- ЗАПУСК ---
 
     if (window.location.pathname.startsWith("/balance")) {
         setTimeout(() => {
