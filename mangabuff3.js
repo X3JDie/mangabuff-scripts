@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         MangaBuff Sequential Loader v2.7 (Smart Comments Loop)
+// @name         MangaBuff Sequential Loader v2.8 (No Reload Spam)
 // @namespace    http://tampermonkey.net/
-// @version      2.7.0
-// @description  Умный цикл комментариев: кликает по кнопке Balance Stats с интервалом 30 сек до выполнения лимита. Агрессия + Чтение до 75.
+// @version      2.8.0
+// @description  Обновляет данные кнопкой "Обновить статистику", а не перезагрузкой. Умный цикл комментов. Агрессия.
 // @match        https://mangabuff.ru/balance
 // @match        https://mangabuff.ru/quiz
 // @match        https://mangabuff.ru/mine
@@ -13,7 +13,7 @@
 
 (function () {
     'use strict';
-    console.log("[Loader v2.7] 🚀 Умный цикл комментариев (30 сек задержка)");
+    console.log("[Loader v2.8] 🚀 Обновление через кнопку статистики. Без спама перезагрузками.");
 
     // --- КОНСТАНТЫ ---
     const CHECK_INTERVAL = 5000; 
@@ -30,6 +30,7 @@
     // Флаги состояний
     let aggressiveInterval = null;
     let isCommentCycleActive = false;
+    let isUpdatingStats = false; // Флаг, чтобы не спамить кнопку обновления
 
     // --- УТИЛИТЫ ---
 
@@ -129,6 +130,25 @@
         }
     }
 
+    // --- ОБНОВЛЕНИЕ СТАТИСТИКИ БЕЗ РЕЛОАДА ---
+    async function refreshStatsViaButton() {
+        if (isUpdatingStats) return;
+        
+        const btn = document.querySelector('button.button'); // Ищем кнопку по классу
+        // Более точный поиск, если есть текст
+        const buttons = Array.from(document.querySelectorAll('button'));
+        const targetBtn = buttons.find(b => b.textContent.includes("Обновить статистику за день"));
+
+        if (targetBtn && isVisible(targetBtn)) {
+            isUpdatingStats = true;
+            console.log("[Loader] Обновляю статистику через кнопку...");
+            targetBtn.click();
+            // Даем время на AJAX запрос и отрисовку
+            await sleep(3000); 
+            isUpdatingStats = false;
+        }
+    }
+
     // --- ЛОГИКА АГРЕССИВНОГО СБОРА КАРТ ---
     function startAggressiveRewardCollection() {
         if (aggressiveInterval) return; 
@@ -139,11 +159,13 @@
         const btn = findQuestButton('read_rewards');
         if (btn) btn.click();
 
-        aggressiveInterval = setInterval(() => {
+        aggressiveInterval = setInterval(async () => {
             const cards = getTodayCardCount();
             if (cards >= 10) {
                 stopAggressiveMode();
-                location.reload();
+                // Здесь можно просто обновить статистику, но для надежности сброса таймера лучше реолоад
+                // Но попробуем без него сначала
+                await refreshStatsViaButton();
                 return;
             }
             const lastTime = getLastCardTime();
@@ -151,7 +173,7 @@
                 const minutesPassed = (Date.now() - lastTime) / 60000;
                 if (minutesPassed < 5) { 
                     stopAggressiveMode();
-                    location.reload(); 
+                    await refreshStatsViaButton();
                     return;
                 }
             }
@@ -190,12 +212,15 @@
             if (customReadBtn && isVisible(customReadBtn)) {
                  customReadBtn.click();
                  showPopup('Читаем до 75...');
+                 // Ждем и обновляем статистику
+                 await sleep(5000);
+                 await refreshStatsViaButton();
             } else {
                  const stdBtn = document.querySelector('.wallet-panel__action--read'); 
                  if(stdBtn) stdBtn.click();
+                 await sleep(5000);
+                 location.reload(); // Если нет кастомной кнопки, возможно нужен реолоад
             }
-            await sleep(randomDelay(5000, 8000));
-            location.reload();
             return;
         }
         
@@ -205,12 +230,14 @@
              if (customReadBtn && isVisible(customReadBtn)) {
                  customReadBtn.click();
                  showPopup('Читаем...');
+                 await sleep(5000);
+                 await refreshStatsViaButton();
              } else {
                  const stdBtn = document.querySelector('.wallet-panel__action--read');
                  if(stdBtn) stdBtn.click();
+                 await sleep(5000);
+                 location.reload();
              }
-             await sleep(randomDelay(5000, 8000));
-             location.reload();
         }
     }
 
@@ -259,7 +286,7 @@
 
     // 5. Комментарии (УМНЫЙ ЦИКЛ)
     function startCommentCycle() {
-        if (isCommentCycleActive) return; // Уже работает
+        if (isCommentCycleActive) return; 
         
         const text = getProgressText('comments');
         if (!text) return;
@@ -274,9 +301,7 @@
         console.log(`[Loader] Запуск цикла комментариев. Текущий: ${cur}, Цель: ${max}. Интервал: 30 сек.`);
         showPopup(`Цикл комментов: ${cur}/${max}`);
 
-        // Функция одного шага цикла
-        const doCommentStep = () => {
-            // Проверяем актуальный прогресс перед каждым шагом
+        const doCommentStep = async () => {
             const currentText = getProgressText('comments');
             if (!currentText) {
                 isCommentCycleActive = false;
@@ -285,7 +310,6 @@
             
             const currentStatus = parseProgress(currentText);
             
-            // Если выполнили всё — выходим
             if (currentStatus.cur >= currentStatus.max) {
                 console.log("[Loader] Все комментарии написаны.");
                 showPopup('Комментарии готовы!');
@@ -293,7 +317,6 @@
                 return;
             }
 
-            // Кликаем кнопку (Balance Stats сделает остальное)
             const btn = findQuestButton('comments');
             if (btn) {
                 console.log(`[Loader] Клик комментария (${currentStatus.cur + 1}/${currentStatus.max})...`);
@@ -304,11 +327,9 @@
                 return;
             }
 
-            // Планируем следующий клик через 30 секунд
             setTimeout(doCommentStep, COMMENT_CLICK_DELAY);
         };
 
-        // Запускаем первый шаг сразу
         doCommentStep();
     }
 
@@ -380,7 +401,8 @@
             if (btn) {
                 btn.click();
                 showPopup('Алмаз за чат');
-                setTimeout(() => location.reload(), 2000);
+                // Здесь можно попробовать обновить статистику вместо реолоада
+                setTimeout(() => refreshStatsViaButton(), 2000);
             }
             scheduleChatDiamond();
         }, delay);
@@ -394,7 +416,7 @@
             localStorage.setItem('last_active_date_v2', today);
             localStorage.removeItem('battle_done_today_v2');
             window.battleCheckDone = false;
-            isCommentCycleActive = false; // Сброс флага комментариев
+            isCommentCycleActive = false;
         }
     }
 
@@ -410,6 +432,12 @@
 
         const cards = getTodayCardCount();
         const chapters = getReadChaptersCount();
+
+        // Периодически обновляем статистику, чтобы данные были свежими
+        // Но не чаще чем раз в 10 секунд
+        if (!isUpdatingStats && Math.random() > 0.7) {
+             await refreshStatsViaButton();
+        }
 
         console.log(`[Loader] Статус: Карт ${cards}/10, Глав ${chapters}/75`);
 
@@ -431,20 +459,14 @@
 
         // ШАГ 3: 3 Карты -> ЗАПУСК ЦИКЛА КОММЕНТАРИЕВ
         if (cards >= 3) {
-            // Запускаем цикл только если он еще не активен
-            // Внутри цикла сама проверка прогресса
             startCommentCycle();
         }
 
         // ШАГ 4: 5 Карт -> Битва
         if (cards >= 5) {
-            // Не идем в битву, пока не закончим комментарии (опционально, но логично)
-            // Если хочешь идти в битву параллельно, убери проверку isCommentCycleActive
             if (!isCommentCycleActive) {
                 await handleBattle();
                 return;
-            } else {
-                console.log("[Loader] Ждем завершения комментариев перед битвой...");
             }
         }
     }
