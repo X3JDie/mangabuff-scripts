@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         MangaBuff Loader
 // @namespace    http://tampermonkey.net/
-// @version      1.10.0-full-restore
-// @description  Полная логика v1.3.1 + клик по кнопке комментариев после 3 наград (20-44 сек) + алмазы 15:30-16 мин + битва с надёжным возвратом. Все функции сохранены.
+// @version      1.10.1-fast-reward
+// @description  Полная логика + быстрый клик наград после 60 мин
 // @match        https://mangabuff.ru/balance
 // @match        https://mangabuff.ru/quiz
 // @match        https://mangabuff.ru/mine
@@ -14,11 +14,8 @@
 
 (function () {
     'use strict';
-    console.log("[Loader] 📦 Скрипт загружен. Версия 1.10.0 (полная логика + исправления)");
+    console.log("[Loader] 📦 Скрипт загружен. Версия 1.11.1");
 
-    // =====================================================================
-    // 🔐 1. CSRF НАСТРОЙКА
-    // =====================================================================
     function setupCSRF() {
         const token = document.querySelector('meta[name="csrf-token"]')?.content;
         if (!token) { console.warn('[Loader] ⚠️ CSRF-токен не найден'); return false; }
@@ -32,50 +29,33 @@
         return true;
     }
 
-    // =====================================================================
-    // ⚙️ 2. НАСТРОЙКИ
-    // =====================================================================
     const CHECK_REWARD_INTERVAL = 30000;
     const ADS_INTERVAL = 5000;
     const MINE_INTERVAL = 4000;
     const MINE_LIMIT = 120;
     const RELOAD_DELAY_MS = 1500;
     const TRIGGER_MINUTES = 19;
-    const AGGRESSIVE_TRIGGER_MINUTES = 60;
-    const AGGRESSIVE_RETRY_MS = 20000;
-
-    // Комментарии (только клик по кнопке)
     const COMMENT_QUEST_START_AFTER_REWARDS = 3;
     const COMMENT_QUEST_MIN_DELAY = 20000;
     const COMMENT_QUEST_MAX_DELAY = 44000;
-
-    // Алмазы за чат
     const CHAT_DIAMOND_MIN_MINUTES = 15.5;
     const CHAT_DIAMOND_MAX_MINUTES = 16;
-
-    // Битва
     const BATTLE_REQUIRED_QUESTS = [
         { text: 'Провести 10 боев', required: '10/10' },
         { text: 'Выиграть 6 боев', required: '6/6' }
     ];
     const BATTLE_CHECK_INTERVAL = 8000;
 
-    // =====================================================================
-    // 📦 3. ПЕРЕМЕННЫЕ СОСТОЯНИЯ
-    // =====================================================================
     let lastRewardClick = 0;
-    let cardSpamInterval = null;
     let aggressiveRewardInterval = null;
     let commentQuestTimeout = null;
     let chatDiamondTimeout = null;
     let battleQuestCheckInterval = null;
-    let battleFlowCompleted = false;
     let commentQuestStarted = false;
     let commentQuestDone = false;
     let questFlowActive = false;
-    let _battleReturnGuard = false; // Защита от зацикливания возврата
+    let _battleReturnGuard = false;
 
-    // Оригинальный пул (сохранён для совместимости, но не используется для отправки)
     const COMMENT_POOL = [
         "Привет всем ", "Всем привет, как настроение? ", "Добрый день, друзья! ",
         "Всем хорошего дня или вечера ", "Привет, как у вас дела сегодня? ",
@@ -84,9 +64,6 @@
         "День проходит спокойно 👍 ", "Да всё нормально ", "Спасибо, дела идут хорошо! "
     ];
 
-    // =====================================================================
-    // 🔧 4. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
-    // =====================================================================
     function getTodayKey() { return new Date().toLocaleDateString('ru-RU'); }
 
     function parseTime(text) {
@@ -158,9 +135,6 @@
 
     function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-    // =====================================================================
-    // 📊 5. ЧТЕНИЕ ПРОГРЕССА (DOM)
-    // =====================================================================
     function getReadRewardsProgress() {
         const block = document.querySelector('.wallet-panel__drop--read_rewards .wallet-panel__drop-text');
         if (!block) return null;
@@ -175,9 +149,6 @@
         return m ? { current: +m[1], total: +m[2], isComplete: +m[1] >= +m[2] } : null;
     }
 
-    // =====================================================================
-    // 💬 6. КЛИК ПО КВЕСТУ КОММЕНТАРИЕВ
-    // =====================================================================
     function clickCommentsQuestButton() {
         const block = document.querySelector('.wallet-panel__drop--comments');
         const btn = block?.querySelector('.wallet-panel__drop-icon');
@@ -208,9 +179,6 @@
         }
     }
 
-    // =====================================================================
-    // 💎 7. АЛМАЗЫ ЗА ЧАТ
-    // =====================================================================
     function clickChatDiamond() {
         const btn = findQuestButton('chat_diamond');
         if (btn && isVisible(btn)) {
@@ -230,9 +198,6 @@
         chatDiamondTimeout = setTimeout(() => { clickChatDiamond(); scheduleChatDiamond(); }, delay);
     }
 
-    // =====================================================================
-    // ⚔️ 8. БИТВА
-    // =====================================================================
     function getBattleQuestsStatus() {
         const quests = [];
         document.querySelectorAll('.battle-home__quest[data-daily-quest]').forEach(el => {
@@ -266,19 +231,14 @@
     function checkAndCollectBattleRewards() {
         if (!areBattleQuestsComplete() || _battleReturnGuard) return;
         _battleReturnGuard = true;
-
         console.log('[Loader] ✅ Квесты битвы выполнены. Сбор наград...');
         collectBattleRewards();
-
-        // Синхронная запись флага перед переходом
         localStorage.setItem(`battle_flow_${getTodayKey()}`, 'true');
         window._battle_done = true;
-
         console.log('[Loader] 🔄 Возврат на /balance через 5 сек...');
         setTimeout(() => {
             window.location.assign('https://mangabuff.ru/balance');
         }, 5000);
-
         if (battleQuestCheckInterval) { clearInterval(battleQuestCheckInterval); battleQuestCheckInterval = null; }
     }
 
@@ -288,9 +248,6 @@
         battleQuestCheckInterval = setInterval(checkAndCollectBattleRewards, BATTLE_CHECK_INTERVAL);
     }
 
-    // =====================================================================
-    // 📚 9. ЧТЕНИЕ И ИВЕНТЫ (ОРИГИНАЛ)
-    // =====================================================================
     function isEventCompleted() {
         const text = document.querySelector('.wallet-panel__drop--event .wallet-panel__drop-text')?.textContent.replace(/\s+/g, ' ').trim() || '';
         const m = text.match(/(\d+)\s+из\s+(\d+)/i);
@@ -360,9 +317,6 @@
         }
     }
 
-    // =====================================================================
-    // 💎 10. НАГРАДЫ (ОРИГИНАЛ + КАРД-СПАМ + АГРЕССИВНЫЙ РЕЖИМ)
-    // =====================================================================
     function clickReward() {
         const btn = findQuestButton('read_rewards');
         if (btn) {
@@ -375,49 +329,19 @@
         return false;
     }
 
-    function startCardSpamIfNeeded() {
-        const cardsToday = getTodayCounts().cards;
-        const chaptersDone = getReadChapters();
-        const lastCardTime = getLastCardTime();
-        if (chaptersDone >= 75 && cardsToday < 10 && lastCardTime) {
-            const minutes = (Date.now() - lastCardTime) / (60 * 1000);
-            if (minutes >= 60 && !cardSpamInterval) {
-                cardSpamInterval = setInterval(() => {
-                    const nowCards = getTodayCounts().cards;
-                    if (nowCards >= 10) { clearInterval(cardSpamInterval); cardSpamInterval = null; return; }
-                    const lc = getLastCardTime();
-                    const mins = lc ? (Date.now() - lc) / (60 * 1000) : 999;
-                    if (mins >= 60) clickReward();
-                }, 60000);
-            }
-        }
-    }
-
     function stopCardSpam() {
-        if (cardSpamInterval) { clearInterval(cardSpamInterval); cardSpamInterval = null; }
         if (aggressiveRewardInterval) { clearInterval(aggressiveRewardInterval); aggressiveRewardInterval = null; }
     }
 
     function checkReward() {
-        if (questFlowActive) return; // Не мешаем последовательности квестов
-
+        if (questFlowActive) return;
         const cardsToday = getTodayCounts().cards;
-        const chaptersDone = getReadChapters();
-        
         if (cardsToday >= 10) {
             stopCardSpam();
-            if (aggressiveRewardInterval) { clearInterval(aggressiveRewardInterval); aggressiveRewardInterval = null; }
             return;
         }
-        
-        if (chaptersDone >= 75) {
-            startCardSpamIfNeeded();
-            return;
-        }
-
         const rewardTimeEl = document.querySelector('.read_rewards_container .reward-time');
         let minutes = null;
-        
         if (rewardTimeEl && /Последняя награда:/i.test(rewardTimeEl.textContent)) {
             const timeText = rewardTimeEl.textContent.replace('Последняя награда:', '').trim();
             minutes = parseTime(timeText);
@@ -427,42 +351,33 @@
                 minutes = (Date.now() - lastRewardTime) / (60 * 1000);
             }
         }
-
         if (minutes === null) return;
-
-        // АГРЕССИВНЫЙ РЕЖИМ
-        if (minutes >= AGGRESSIVE_TRIGGER_MINUTES && !aggressiveRewardInterval) {
-            console.log(`[Loader] ⚡ Агрессивный режим: прошло ${minutes} мин`);
-            aggressiveRewardInterval = setInterval(() => {
-                const currentCards = getTodayCounts().cards;
-                if (currentCards > cardsToday || currentCards >= 10) {
-                    console.log('[Loader] ✅ Награда получена, выход из агрессивного режима');
-                    clearInterval(aggressiveRewardInterval); aggressiveRewardInterval = null; return;
-                }
-                const currentEl = document.querySelector('.read_rewards_container .reward-time');
-                if (currentEl) {
-                    const curText = currentEl.textContent.replace('Последняя награда:', '').trim();
-                    const curMin = parseTime(curText);
-                    if (curMin !== null && curMin < 5) {
-                        console.log('[Loader] ✅ Таймер сбросился, выход из агрессивного режима');
+        if (minutes >= 60) {
+            if (!aggressiveRewardInterval) {
+                aggressiveRewardInterval = setInterval(() => {
+                    const currentCards = getTodayCounts().cards;
+                    if (currentCards >= 10) {
                         clearInterval(aggressiveRewardInterval); aggressiveRewardInterval = null; return;
                     }
-                }
+                    const curEl = document.querySelector('.read_rewards_container .reward-time');
+                    if (curEl) {
+                        const curText = curEl.textContent.replace('Последняя награда:', '').trim();
+                        const curMin = parseTime(curText);
+                        if (curMin !== null && curMin < 10) {
+                            clearInterval(aggressiveRewardInterval); aggressiveRewardInterval = null; return;
+                        }
+                    }
+                    clickReward();
+                }, 10000 + Math.floor(Math.random() * 8000));
                 clickReward();
-            }, AGGRESSIVE_RETRY_MS);
-            clickReward();
+            }
             return;
         }
-
-        // ОБЫЧНЫЙ РЕЖИМ
         if (minutes >= TRIGGER_MINUTES && Date.now() - lastRewardClick > 10 * 60 * 1000 && !aggressiveRewardInterval) {
             clickReward();
         }
     }
 
-    // =====================================================================
-    // 📺 11. РЕКЛАМА / ⛏️ ШАХТА
-    // =====================================================================
     function clickAds() {
         const block = document.querySelector('.wallet-panel__drop--watch_ads .wallet-panel__drop-text');
         const m = block?.textContent.match(/(\d+)\s+из\s+(\d+)/);
@@ -485,9 +400,6 @@
         }
     }
 
-    // =====================================================================
-    // ❓ 12. КВИЗ (ОРИГИНАЛ)
-    // =====================================================================
     function hasQuizToday() {
         const stats = JSON.parse(localStorage.getItem("balance_stats") || "[]");
         const today = getTodayKey();
@@ -511,7 +423,6 @@
         return false;
     }
 
-    // QUIZ SOLVER
     if (window.location.pathname.startsWith("/quiz")) {
         let answer = "";
         let clickCount = 0;
@@ -544,11 +455,7 @@
         if (targetNode) observer.observe(targetNode, { childList: true, subtree: true });
     }
 
-    // =====================================================================
-    // 🚀 13. ПОСЛЕДОВАТЕЛЬНОСТЬ КВЕСТОВ
-    // =====================================================================
     function startQuestFlow() {
-        // Жёсткая проверка флага (localStorage + window)
         const doneFlag = localStorage.getItem(`battle_flow_${getTodayKey()}`) === 'true' || window._battle_done === true;
         if (doneFlag || questFlowActive) {
             console.log('[Loader] ⏭️ Битва уже пройдена или поток активен.');
@@ -560,13 +467,10 @@
     }
 
     async function runAllStages() {
-        // 1. Шахта
         console.log('[Loader] ⛏️ Этап 1: Шахта');
         const mineBtn = findQuestButton('mine');
         if (mineBtn && isVisible(mineBtn)) { mineBtn.click(); showPopup('Шахта'); }
         await sleep(3000);
-
-        // 2. Ждём 3 награды
         console.log('[Loader] 💎 Этап 2: Ждём 3+ награды');
         while (true) {
             const rewards = getReadRewardsProgress();
@@ -581,8 +485,6 @@
             }
             await sleep(5000);
         }
-
-        // 3. Реклама + Квиз
         console.log('[Loader] 📺 Этап 3: Реклама и Квиз');
         const adsCheck = setInterval(() => {
             const block = document.querySelector('.wallet-panel__drop--watch_ads .wallet-panel__drop-text');
@@ -592,7 +494,6 @@
                 if (btn && isVisible(btn)) btn.click();
             }
         }, ADS_INTERVAL);
-
         if (!hasQuizToday()) {
             console.log('[Loader] 🧩 Переход на квиз...');
             clearInterval(adsCheck);
@@ -602,39 +503,29 @@
         }
         clearInterval(adsCheck);
         await sleep(3000);
-
-        // 4. Битва
         console.log('[Loader] ⚔️ Этап 4: Переход на /battle');
         await sleep(2000);
         window.location.href = '/battle';
     }
 
-    // =====================================================================
-    // 📍 14. ТОЧКИ ВХОДА
-    // =====================================================================
     if (window.location.pathname.startsWith("/balance")) {
         setTimeout(() => {
             setupCSRF();
             ensureChaptersThenEvent();
-            
             if (getReadChapters() >= 10) {
                 setInterval(checkReward, CHECK_REWARD_INTERVAL);
                 setInterval(clickAds, ADS_INTERVAL);
                 setInterval(mineLoop, MINE_INTERVAL);
                 scheduleChatDiamond();
                 setInterval(tryStartCommentQuest, 10000);
-                
-                // Запуск цепочки квестов
                 setTimeout(() => {
                     if (!hasQuizToday()) checkQuiz();
                 }, 2000);
-
                 setTimeout(() => {
                     if (clickUpdateDayButton()) {
                         setTimeout(() => { if (!hasQuizToday()) window.location.href = "/quiz"; }, 5000 + Math.floor(Math.random() * 5000));
                     } else { if (!hasQuizToday()) window.location.href = "/quiz"; }
                 }, 4000);
-
                 if (!questFlowActive && !window._battle_done) {
                     setTimeout(startQuestFlow, 8000);
                 }
