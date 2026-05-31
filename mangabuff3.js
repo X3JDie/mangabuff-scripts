@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         MangaBuff Loader
 // @namespace    http://tampermonkey.net/
-// @version      1.10.1-fast-reward
-// @description  Полная логика + быстрый клик наград после 60 мин
+// @version      1.11.3
+// @description  Полная логика + быстрый клик наград + стоп на 75 + кнопка битвы (отложенная смена)
 // @match        https://mangabuff.ru/balance
 // @match        https://mangabuff.ru/quiz
 // @match        https://mangabuff.ru/mine
@@ -14,11 +14,11 @@
 
 (function () {
     'use strict';
-    console.log("[Loader] 📦 Скрипт загружен. Версия 1.11.1");
+    console.log("[Loader] 📦 Скрипт загружен. Версия 1.11.3");
 
     function setupCSRF() {
         const token = document.querySelector('meta[name="csrf-token"]')?.content;
-        if (!token) { console.warn('[Loader] ⚠️ CSRF-токен не найден'); return false; }
+        if (!token) return false;
         $.ajaxSetup({
             headers: { 'X-CSRF-TOKEN': token },
             beforeSend: function(xhr) {
@@ -55,14 +55,8 @@
     let commentQuestDone = false;
     let questFlowActive = false;
     let _battleReturnGuard = false;
-
-    const COMMENT_POOL = [
-        "Привет всем ", "Всем привет, как настроение? ", "Добрый день, друзья! ",
-        "Всем хорошего дня или вечера ", "Привет, как у вас дела сегодня? ",
-        "Как проходит ваш день? ", "Что нового у вас? ", "Как настроение сегодня? ",
-        "Чем занимаетесь сейчас? ", "У меня всё отлично, спасибо! ", "Настроение супер, а у вас? ",
-        "День проходит спокойно 👍 ", "Да всё нормально ", "Спасибо, дела идут хорошо! "
-    ];
+    let stayInBattle = localStorage.getItem('mb_stay_in_battle') === 'true';
+    let pendingStayChange = false;
 
     function getTodayKey() { return new Date().toLocaleDateString('ru-RU'); }
 
@@ -86,7 +80,7 @@
                 document.body.appendChild(div);
                 setTimeout(() => { if (div.parentNode) div.parentNode.removeChild(div); }, 3000);
             }
-        } catch (e) { console.warn('[Loader] Popup error:', e); }
+        } catch (e) {}
     }
 
     function getRewards() {
@@ -104,13 +98,6 @@
             cards: items.filter(i => i.type === 'card' && new Date(i.time).toLocaleDateString('ru-RU') === today).length,
             scrolls: items.filter(i => i.type === 'scroll' && new Date(i.time).toLocaleDateString('ru-RU') === today).length
         };
-    }
-
-    function getLastCardTime() {
-        const cards = getRewards().filter(i => i.type === 'card');
-        if (cards.length === 0) return null;
-        const last = cards.reduce((a, b) => (a.time > b.time ? a : b));
-        return typeof last.time === 'number' ? last.time : null;
     }
 
     function getLastRewardTimeFromStorage() {
@@ -228,22 +215,48 @@
         });
     }
 
+    function createBattleToggle() {
+        if (window.location.pathname !== '/battle') return;
+        const existing = document.getElementById('mb-battle-toggle');
+        if (existing) existing.remove();
+
+        const btn = document.createElement('button');
+        btn.id = 'mb-battle-toggle';
+        btn.textContent = stayInBattle ? '🔓 Остаться в битве' : '🔒 Авто-возврат';
+        btn.style.cssText = 'position:fixed;top:20px;right:20px;padding:10px 15px;background:#1a1a1a;color:#fff;border:1px solid #444;border-radius:8px;cursor:pointer;z-index:9999;font-size:13px;transition:0.2s;';
+        btn.onmouseenter = () => btn.style.borderColor = '#0f0';
+        btn.onmouseleave = () => btn.style.borderColor = '#444';
+        btn.onclick = () => {
+            pendingStayChange = true;
+            const futureState = !stayInBattle;
+            btn.textContent = futureState ? '🔓 Смена на: Остаться' : '🔒 Смена на: Авто-возврат';
+            btn.style.borderColor = '#ff0';
+        };
+        document.body.appendChild(btn);
+    }
+
     function checkAndCollectBattleRewards() {
         if (!areBattleQuestsComplete() || _battleReturnGuard) return;
         _battleReturnGuard = true;
-        console.log('[Loader] ✅ Квесты битвы выполнены. Сбор наград...');
         collectBattleRewards();
         localStorage.setItem(`battle_flow_${getTodayKey()}`, 'true');
         window._battle_done = true;
-        console.log('[Loader] 🔄 Возврат на /balance через 5 сек...');
-        setTimeout(() => {
-            window.location.assign('https://mangabuff.ru/balance');
-        }, 5000);
+
+        if (pendingStayChange) {
+            stayInBattle = !stayInBattle;
+            localStorage.setItem('mb_stay_in_battle', stayInBattle);
+            pendingStayChange = false;
+            showPopup(stayInBattle ? 'Режим: Остаться' : 'Режим: Авто-возврат');
+        }
+
+        if (!stayInBattle) {
+            setTimeout(() => window.location.assign('https://mangabuff.ru/balance'), 5000);
+        }
         if (battleQuestCheckInterval) { clearInterval(battleQuestCheckInterval); battleQuestCheckInterval = null; }
     }
 
     function initBattlePage() {
-        console.log('[Loader] ⚔️ Битва: запуск отслеживания');
+        createBattleToggle();
         checkAndCollectBattleRewards();
         battleQuestCheckInterval = setInterval(checkAndCollectBattleRewards, BATTLE_CHECK_INTERVAL);
     }
@@ -270,8 +283,6 @@
             if (!localStorage.getItem("event_reload_done")) {
                 localStorage.setItem("event_reload_done", "true");
                 location.reload();
-            } else {
-                console.log("[Loader] Эвент собран, reload уже был");
             }
         }
     }
@@ -288,12 +299,16 @@
     }
 
     function clickReadButton() {
+        const chapters = getReadChapters();
+        if (chapters >= 75) return;
         const btn = findQuestButton('read');
         if (btn) { btn.click(); showPopup('Чтение главы'); }
     }
 
     function ensureChaptersThenEvent() {
         const chapters = getReadChapters();
+        if (chapters >= 75) return;
+        
         if (chapters < 5) {
             clickReadButton();
             const interval5 = setInterval(() => {
@@ -352,6 +367,7 @@
             }
         }
         if (minutes === null) return;
+        
         if (minutes >= 60) {
             if (!aggressiveRewardInterval) {
                 aggressiveRewardInterval = setInterval(() => {
@@ -416,6 +432,7 @@
         const buttons = document.querySelectorAll("button.button");
         for (const btn of buttons) {
             if (btn.textContent.includes("Обновить статистику за день")) {
+                console.log("🔄 Обновление статистики за 1 день(ей) ...");
                 btn.click();
                 return true;
             }
@@ -457,21 +474,15 @@
 
     function startQuestFlow() {
         const doneFlag = localStorage.getItem(`battle_flow_${getTodayKey()}`) === 'true' || window._battle_done === true;
-        if (doneFlag || questFlowActive) {
-            console.log('[Loader] ⏭️ Битва уже пройдена или поток активен.');
-            return;
-        }
+        if (doneFlag || questFlowActive) return;
         questFlowActive = true;
-        console.log('[Loader] 🚀 Запуск последовательности квестов');
         runAllStages();
     }
 
     async function runAllStages() {
-        console.log('[Loader] ⛏️ Этап 1: Шахта');
         const mineBtn = findQuestButton('mine');
         if (mineBtn && isVisible(mineBtn)) { mineBtn.click(); showPopup('Шахта'); }
         await sleep(3000);
-        console.log('[Loader] 💎 Этап 2: Ждём 3+ награды');
         while (true) {
             const rewards = getReadRewardsProgress();
             if (rewards && rewards.current >= 3) break;
@@ -485,7 +496,6 @@
             }
             await sleep(5000);
         }
-        console.log('[Loader] 📺 Этап 3: Реклама и Квиз');
         const adsCheck = setInterval(() => {
             const block = document.querySelector('.wallet-panel__drop--watch_ads .wallet-panel__drop-text');
             const m = block?.textContent.match(/(\d+)\s+из\s+(\d+)/);
@@ -495,7 +505,6 @@
             }
         }, ADS_INTERVAL);
         if (!hasQuizToday()) {
-            console.log('[Loader] 🧩 Переход на квиз...');
             clearInterval(adsCheck);
             await sleep(2000);
             window.location.href = '/quiz';
@@ -503,7 +512,6 @@
         }
         clearInterval(adsCheck);
         await sleep(3000);
-        console.log('[Loader] ⚔️ Этап 4: Переход на /battle');
         await sleep(2000);
         window.location.href = '/battle';
     }
