@@ -235,25 +235,44 @@
         document.body.appendChild(btn);
     }
 
-    function checkAndCollectBattleRewards() {
-        if (!areBattleQuestsComplete() || _battleReturnGuard) return;
-        _battleReturnGuard = true;
-        collectBattleRewards();
-        localStorage.setItem(`battle_flow_${getTodayKey()}`, 'true');
-        window._battle_done = true;
-
-        if (pendingStayChange) {
-            stayInBattle = !stayInBattle;
-            localStorage.setItem('mb_stay_in_battle', stayInBattle);
-            pendingStayChange = false;
-            showPopup(stayInBattle ? 'Режим: Остаться' : 'Режим: Авто-возврат');
-        }
-
-        if (!stayInBattle) {
-            setTimeout(() => window.location.assign('https://mangabuff.ru/balance'), 5000);
-        }
-        if (battleQuestCheckInterval) { clearInterval(battleQuestCheckInterval); battleQuestCheckInterval = null; }
+function checkAndCollectBattleRewards() {
+    console.log('[Loader] ⚔️ checkAndCollectBattleRewards вызвана');
+    
+    if (!areBattleQuestsComplete() || _battleReturnGuard) {
+        console.log('[Loader] ⚠️ Выход: квесты не завершены или guard активен');
+        return;
     }
+    
+    _battleReturnGuard = true;
+    collectBattleRewards();
+    localStorage.setItem(`battle_flow_${getTodayKey()}`, 'true');
+    window._battle_done = true;
+
+    if (pendingStayChange) {
+        stayInBattle = !stayInBattle;
+        localStorage.setItem('mb_stay_in_battle', stayInBattle);
+        pendingStayChange = false;
+        showPopup(stayInBattle ? 'Режим: Остаться' : 'Режим: Авто-возврат');
+    }
+
+    const currentStay = localStorage.getItem('mb_stay_in_battle') === 'true';
+    console.log(`[Loader] 🎯 stayInBattle: ${currentStay}`);
+
+    if (!currentStay) {
+        console.log('[Loader] 🔄 Планирую возврат на /balance через 5 сек');
+        if (battleQuestCheckInterval) {
+            clearInterval(battleQuestCheckInterval);
+            battleQuestCheckInterval = null;
+            console.log('[Loader] 🧹 Интервал очищен');
+        }
+        setTimeout(() => {
+            console.log('[Loader] 🚀 Выполняю редирект');
+            window.location.replace('https://mangabuff.ru/balance');
+        }, 5000);
+    } else {
+        console.log('[Loader] ⏸️ Режим "Остаться" — редирект отменён');
+    }
+}
 
     function initBattlePage() {
         createBattleToggle();
