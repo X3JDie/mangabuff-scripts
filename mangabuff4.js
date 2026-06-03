@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         MangaBuff Loader
 // @namespace    http://tampermonkey.net/
-// @version      1.11.9
-// @description  Жёсткие перезагрузки + Задержка 10-120с + Защита от сжигания глав + Умные комментарии + Битва + 180мин карты + Имитация человека
+// @version      1.12.1
+// @description  Жёсткие перезагрузки + Задержка 10-120с + Защита от сжигания глав + Умные комментарии + Битва + 180мин карты + Имитация человека + АВТО-СБОР ИВЕНТА (1 клик + мониторинг)
 // @match        https://mangabuff.ru/balance
 // @match        https://mangabuff.ru/quiz
 // @match        https://mangabuff.ru/mine
@@ -18,14 +18,15 @@
 
 (function () {
     'use strict';
-    console.log("[Loader] 📦 Скрипт загружен. Версия 1.11.9 (Задержка 10-120с + Защита глав)");
+    console.log("[Loader] 📦 Скрипт загружен. Версия 1.12.1 (Ивент: 1 клик + мониторинг)");
 
     // ==========================================
     // ⚙️ НАСТРОЙКИ
     // ==========================================
-    const CARD_COOLDOWN_MINUTES = 61; // 180 для новых, 60 для старых
+    const CARD_COOLDOWN_MINUTES = 61;
     const SCROLL_CHECK_MINUTES = 19;
     const MAX_FAILED_READ_ATTEMPTS = 5;
+    const EVENT_MONITOR_INTERVAL = 10000; // Проверка прогресса ивента каждые 10 сек
     // ==========================================
 
     function setupCSRF() {
@@ -50,7 +51,7 @@
     const CHAT_DIAMOND_MAX_MINUTES = 16;
     const BATTLE_REQUIRED_QUESTS = [
         { text: 'Провести 10 боев', required: '10/10' },
-        { text: 'Выиграть 6 боев', required: '6/6' }
+        { text: 'Выиграть 11 боев', required: '11/11' }
     ];
     const BATTLE_CHECK_INTERVAL = 8000;
 
@@ -64,6 +65,10 @@
     
     let commentsClickedThisSession = 0;
     let commentQuestActive = false;
+
+    // 🎉 НОВОЕ: состояние ивента
+    let isMonitoringEvent = false;
+    let eventMonitorInterval = null;
 
     function getRandomInt(min, max) {
         return Math.floor(Math.random() * (max - min + 1)) + min;
@@ -150,6 +155,112 @@
     }
 
     // ==========================================
+    // 🎉 АВТО-СБОР ИВЕНТА (1 клик + мониторинг)
+    // ==========================================
+    function getEventProgress() {
+        const block = document.querySelector('.wallet-panel__drop--event .wallet-panel__drop-text');
+        if (!block) return null; // Ивента нет на странице
+        const text = block.textContent.trim();
+        const m = text.match(/(\d+)\s*из\s*(\d+)/i);
+        if (m) {
+            return {
+                current: +m[1],
+                total: +m[2],
+                isComplete: +m[1] >= +m[2],
+                rawText: text
+            };
+        }
+        return null;
+    }
+
+    function clickEventButtonOnce() {
+        const btn = findQuestButton('event');
+        if (btn && isVisible(btn)) {
+            btn.click();
+            showPopup('🎉 Ивент запущен (1 клик)');
+            console.log('[Loader] 🎉 ✅ Кликнул по ивенту ОДИН раз. Теперь жду выполнения...');
+            return true;
+        }
+        console.log('[Loader] 🎉 Кнопка ивента не найдена или невидима');
+        return false;
+    }
+
+    function stopEventMonitoring(reason = 'неизвестно') {
+        if (eventMonitorInterval) {
+            clearInterval(eventMonitorInterval);
+            eventMonitorInterval = null;
+        }
+        isMonitoringEvent = false;
+        console.log(`[Loader] 🎉 🛑 Мониторинг ивента остановлен. Причина: ${reason}`);
+    }
+
+    function startEventMonitoring() {
+        if (isMonitoringEvent) {
+            console.log('[Loader] 🎉 Мониторинг ивента уже запущен');
+            return;
+        }
+
+        isMonitoringEvent = true;
+        console.log('[Loader] 🎉 🔍 ЗАПУСКАЮ МОНИТОРИНГ ИВЕНТА (проверка каждые 10 сек)...');
+
+        eventMonitorInterval = setInterval(() => {
+            const progress = getEventProgress();
+
+            if (!progress) {
+                console.log('[Loader] 🎉 Ивент исчез со страницы. Останавливаю мониторинг.');
+                stopEventMonitoring('ивент исчез');
+                return;
+            }
+
+            console.log(`[Loader] 🎉 Прогресс ивента: ${progress.current}/${progress.total}`);
+
+            if (progress.isComplete) {
+                console.log(`[Loader] 🎉 🎯 ИВЕНТ ВЫПОЛНЕН! Прогресс: ${progress.current}/${progress.total}`);
+                showPopup('🎉 Ивент собран!');
+                stopEventMonitoring('выполнен');
+                // Reload чтобы обновить страницу и забрать награды
+                if (!localStorage.getItem("event_done_reload_" + getTodayKey())) {
+                    localStorage.setItem("event_done_reload_" + getTodayKey(), "true");
+                    setTimeout(() => location.reload(), 3000);
+                }
+                return;
+            }
+
+            // Если ивент ещё не выполнен, но кнопка снова активна (например, после перезагрузки) — кликаем ещё раз
+            const btn = findQuestButton('event');
+            if (btn && isVisible(btn)) {
+                console.log('[Loader] 🎉 Кнопка ивента снова активна. Делаю повторный клик...');
+                clickEventButtonOnce();
+            }
+        }, EVENT_MONITOR_INTERVAL);
+    }
+
+    function checkAndStartEvent() {
+        console.log('[Loader] 🎉 Проверяю наличие активного ивента...');
+        const progress = getEventProgress();
+        
+        if (!progress) {
+            console.log('[Loader] 🎉 Ивент не активен (блок отсутствует).');
+            return;
+        }
+
+        if (progress.isComplete) {
+            console.log('[Loader] 🎉 Ивент уже выполнен.');
+            return;
+        }
+
+        console.log(`[Loader] 🎉 Ивент активен! Прогресс: ${progress.current}/${progress.total}.`);
+        
+        // Делаем ОДИН клик по кнопке ивента
+        const clicked = clickEventButtonOnce();
+        
+        if (clicked) {
+            // Запускаем мониторинг прогресса
+            startEventMonitoring();
+        }
+    }
+
+    // ==========================================
     // ЖЁСТКИЕ ПЕРЕЗАГРУЗКИ (Аналог Ctrl+F5)
     // ==========================================
     function handleHardReloads() {
@@ -170,7 +281,7 @@
         }
         
         if (reloadState === '1') {
-            const delay = 5000 + Math.random() * 6000; // 5-11 секунд
+            const delay = 5000 + Math.random() * 6000;
             console.log(`[Loader] 🔄 Выполняю ВТОРУЮ жёсткую перезагрузку через ${Math.round(delay/1000)} сек...`);
             sessionStorage.setItem('mb_reload_state', '2');
             setTimeout(() => location.reload(true), delay);
@@ -570,7 +681,7 @@
     // ИМИТАЦИЯ ЧЕЛОВЕКА
     // ==========================================
     function scheduleRandomWander() {
-        if (questFlowActive || isFarmingCard || commentQuestActive) {
+        if (questFlowActive || isFarmingCard || commentQuestActive || isMonitoringEvent) {
             setTimeout(scheduleRandomWander, 5 * 60 * 1000);
             return;
         }
@@ -668,6 +779,11 @@
             setupCSRF();
             
             console.log('[Loader] 🚀 Запуск основной логики /balance');
+            
+            // 🎉 ПРИОРИТЕТ №1: Если есть ивент — запускаем его СРАЗУ (1 клик + мониторинг)
+            checkAndStartEvent();
+            
+            // Чтение глав (параллельно с ивентом)
             ensureChaptersThenEvent();
             
             if (getReadChapters() >= 10 || getReadChapters() === -1) {
@@ -684,6 +800,14 @@
                 setInterval(mineLoop, MINE_INTERVAL);
                 scheduleChatDiamond();
                 setInterval(tryStartCommentQuest, 10000);
+                
+                // 🎉 Периодическая проверка ивента (если мониторинг остановился, но ивент ещё активен)
+                setInterval(() => {
+                    if (!isMonitoringEvent) {
+                        console.log('[Loader] 🎉 Повторная проверка ивента...');
+                        checkAndStartEvent();
+                    }
+                }, 60000);
                 
                 setTimeout(() => { if (!hasQuizToday()) checkQuiz(); }, 2000);
                 setTimeout(() => {
