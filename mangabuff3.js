@@ -1,652 +1,405 @@
 // ==UserScript==
 // @name         MangaBuff Loader
 // @namespace    http://tampermonkey.net/
-// @version      1.12.6
-// @description  Fixed quiz delay 10-27s
-// @match        https://mangabuff.ru/balance
+// @version      3.2.9
+// @description  Подключает основной скрипт из локального файла
+// @match        https://mangabuff.ru/balance 
 // @match        https://mangabuff.ru/quiz
 // @match        https://mangabuff.ru/mine
-// @match        https://mangabuff.ru/battle
-// @match        https://mangabuff.ru/notifications
-// @match        https://mangabuff.ru/auctions
-// @match        https://mangabuff.ru/chat
 // @grant        none
-// @run-at       document-end
-// @require      https://code.jquery.com/jquery-3.6.0.min.js
-// @require      https://cdn.jsdelivr.net/gh/X3JDie/mangabuff-scripts@main/mangabuff4
+// @require
 // ==/UserScript==
 
 (function () {
-    'use strict';
-    console.log("[Loader] Script loaded v1.12.6");
+  'use strict';
 
-    const CARD_COOLDOWN_MINUTES = 61;
-    const SCROLL_CHECK_MINUTES = 19;
-    const EVENT_MONITOR_INTERVAL = 10000;
+  console.log("[Loader] 📦Скрипт загружен из GitHub  Эвент окончен v3.2.9 (без комментариев)" );
+  
+  const CHECK_REWARD_INTERVAL = 30000;
+  const ADS_INTERVAL = 5000;
+  const MINE_INTERVAL = 4000;
+  const MINE_LIMIT = 120;
+  const RELOAD_DELAY_MS = 1500;
+  const TRIGGER_MINUTES = 19;
 
-    function setupCSRF() {
-        const token = document.querySelector('meta[name="csrf-token"]')?.content;
-        if (!token) return false;
-        $.ajaxSetup({
-            headers: { 'X-CSRF-TOKEN': token },
-            beforeSend: function(xhr) {
-                const current = document.querySelector('meta[name="csrf-token"]')?.content;
-                if (current && current !== token) xhr.setRequestHeader('X-CSRF-TOKEN', current);
-            }
-        });
-        return true;
+  let lastRewardClick = 0;
+  let cardSpamInterval = null;
+
+  function getTodayKey() {
+    return new Date().toLocaleDateString('ru-RU');
+  }
+
+  function parseTime(text) {
+    const h = text.match(/(\d+)\s*ч/);
+    const m = text.match(/(\d+)\s*мин/);
+    const s = text.match(/(\d+)\s*сек/);
+    return (h ? +h[1] * 60 : 0) + (m ? +m[1] : 0) + (s ? +s[1] / 60 : 0);
+  }
+
+  function getLastRewardTimeFromStorage() {
+    const items = getRewards();
+    if (items.length === 0) return null;
+    const last = items.reduce((a, b) => (a.time > b.time ? a : b));
+    return typeof last.time === 'number' ? last.time : null;
+  }
+
+  function showPopup(msg) {
+    const div = document.createElement('div');
+    div.textContent = msg;
+    Object.assign(div.style, {
+      position:'fixed',bottom:'20px',right:'20px',background:'#222',color:'#0f0',
+      padding:'10px 15px',borderRadius:'10px',boxShadow:'0 0 10px #0f0',fontSize:'14px',zIndex:9999
+    });
+    document.body.appendChild(div);
+    setTimeout(() => div.remove(), 3000);
+  }
+
+  function getRewards() {
+    try {
+      const raw = localStorage.getItem('read_rewards');
+      const obj = JSON.parse(raw);
+      return Array.isArray(obj?.items) ? obj.items : [];
+    } catch { return []; }
+  }
+
+  function getTodayCounts() {
+    const today = new Date().toLocaleDateString('ru-RU');
+    const items = getRewards();
+    return {
+      cards: items.filter(i => i.type === 'card' && new Date(i.time).toLocaleDateString('ru-RU') === today).length,
+      scrolls: items.filter(i => i.type === 'scroll' && new Date(i.time).toLocaleDateString('ru-RU') === today).length
+    };
+  }
+
+  function getLastCardTime() {
+    const cards = getRewards().filter(i => i.type === 'card');
+    if (cards.length === 0) return null;
+    const last = cards.reduce((a, b) => (a.time > b.time ? a : b));
+    return typeof last.time === 'number' ? last.time : null;
+  }
+
+  function isVisible(el) {
+    if (!el) return false;
+    const style = window.getComputedStyle(el);
+    const rect = el.getBoundingClientRect();
+    return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
+  }
+
+  function findQuestButton(name) {
+    const block = document.querySelector(`.wallet-panel__drop--${name}`);
+    const btn = block?.querySelector('.wallet-panel__drop-icon');
+    return isVisible(btn) ? btn : null;
+  }
+
+function isEventCompleted() {
+  const eventBlock = document.querySelector('.wallet-panel__drop--event .wallet-panel__drop-text');
+  const text = eventBlock?.textContent.replace(/\s+/g, ' ').trim() || '';
+  const m = text.match(/Event\s+(\d+)\s+из\s+(\d+)/i);
+  if (!m) return false;
+
+  const current = +m[1];
+  const total = +m[2];
+
+  if (current >= 35) {
+    if (!localStorage.getItem("event35_reload_done")) {
+      localStorage.setItem("event35_reload_done", "true");
+      location.reload();
+      return true;
     }
+  }
 
-    const ADS_INTERVAL = 5000;
-    const MINE_INTERVAL = 4000;
-    const MINE_LIMIT = 120;
-    const RELOAD_DELAY_MS = 1500;
-    const COMMENT_QUEST_START_AFTER_REWARDS = 3;
-    const CHAT_DIAMOND_MIN_MINUTES = 15.5;
-    const CHAT_DIAMOND_MAX_MINUTES = 16;
-    const BATTLE_REQUIRED_QUESTS = [
-        { text: 'Провести 10 боев', required: '10/10' },
-        { text: 'Выиграть 11 боев', required: '11/11' }
-    ];
-    const BATTLE_CHECK_INTERVAL = 8000;
+  return current >= total;
+}
 
-    let chatDiamondTimeout = null;
-    let battleQuestCheckInterval = null;
-    let questFlowActive = false;
-    let _battleReturnGuard = false;
-    let isFarmingCard = false;
-    let farmCardInterval = null;
-    let commentsClickedThisSession = 0;
-    let commentQuestActive = false;
-    let isMonitoringEvent = false;
-    let eventMonitorInterval = null;
-
-    function getRandomInt(min, max) {
-        return Math.floor(Math.random() * (max - min + 1)) + min;
+  
+function proceedEventCheck() {
+  if (!isEventCompleted()) {
+    clickEventButton();
+  } else {
+    if (!localStorage.getItem("event_reload_done")) {
+      localStorage.setItem("event_reload_done", "true");
+      location.reload();
+    } else {
+      console.log("[Loader] Эвент собран, reload уже был");
     }
+  }
+}
 
-    function getTodayKey() { return new Date().toLocaleDateString('ru-RU'); }
-
-    function parseTime(text) {
-        if (!text) return null;
-        const h = text.match(/(\d+)\sч/);
-        const m = text.match(/(\d+)\sмин/);
-        const s = text.match(/(\d+)\s*сек/);
-        return (h ? +h[1] * 60 : 0) + (m ? +m[1] : 0) + (s ? +s[1] / 60 : 0);
+  
+  function clickEventButton() {
+    const btn = findQuestButton('event');
+    if (btn) {
+      btn.click();
+      showPopup('Event');
     }
+  }
+  
+  function getReadChapters() {
+  const block = document.querySelector('.wallet-panel__drop--read .wallet-panel__drop-text');
+  const m = block?.textContent.match(/Глав\s+(\d+)\s+из\s+(\d+)/);
+  return m ? +m[1] : 0;
+}
 
-    function showPopup(msg) {
-        try {
-            const div = document.createElement('div');
-            div.textContent = msg;
-            div.style.position = 'fixed';
-            div.style.bottom = '20px';
-            div.style.right = '20px';
-            div.style.background = '#222';
-            div.style.color = '#0f0';
-            div.style.padding = '10px 15px';
-            div.style.borderRadius = '10px';
-            div.style.boxShadow = '0 0 10px #0f0';
-            div.style.fontSize = '14px';
-            div.style.zIndex = '9999';
-            div.style.pointerEvents = 'none';
-            if (document.body) {
-                document.body.appendChild(div);
-                setTimeout(() => { if (div.parentNode) div.parentNode.removeChild(div); }, 3000);
-            }
-        } catch (e) {}
+function clickReadButton() {
+  const btn = findQuestButton('read');
+  if (btn) {
+    btn.click();
+    showPopup('Чтение главы');
+  }
+}
+
+function ensureChaptersThenEvent() {
+  const chapters = getReadChapters();
+
+  if (chapters < 5) {
+    clickReadButton();
+    const interval5 = setInterval(() => {
+      if (getReadChapters() >= 5) {
+        clearInterval(interval5);
+        location.reload(); 
+      }
+    }, 5000);
+    return;
+  }
+
+  if (chapters < 10) {
+    clickReadButton();
+    const interval10 = setInterval(() => {
+      if (getReadChapters() >= 10) {
+        clearInterval(interval10);
+        location.reload();
+      }
+    }, 5000);
+    return;
+  }
+
+  if (!localStorage.getItem("chapters_reload_done")) {
+    localStorage.setItem("chapters_reload_done", "true");
+    location.reload();
+  } else {
+    console.log("[Loader] Главы >= 10, reload уже был");
+    clickEventButton();
+  }
+}
+
+  function clickReward() {
+    const btn = findQuestButton('read_rewards');
+    if (btn) {
+      btn.click();
+      lastRewardClick = Date.now();
+      showPopup('Награда за чтение');
     }
+  }
 
-    function getRewards() {
-        try {
-            const raw = localStorage.getItem('read_rewards');
-            const obj = JSON.parse(raw);
-            return Array.isArray(obj?.items) ? obj.items : [];
-        } catch { return []; }
+  function startCardSpamIfNeeded() {
+    const cardsToday = getTodayCounts().cards;
+    const readBlock = document.querySelector('.wallet-panel__drop--read .wallet-panel__drop-text');
+    const m = readBlock?.textContent.match(/Глав\s+(\d+)\s+из\s+(\d+)/);
+    const chaptersDone = m ? +m[1] : 0;
+    const lastCardTime = getLastCardTime();
+    if (chaptersDone >= 75 && cardsToday < 10 && lastCardTime) {
+      const minutes = (Date.now() - lastCardTime) / (60 * 1000);
+      if (minutes >= 60 && !cardSpamInterval) {
+        cardSpamInterval = setInterval(() => {
+          const nowCards = getTodayCounts().cards;
+          if (nowCards >= 10) {
+            clearInterval(cardSpamInterval);
+            cardSpamInterval = null;
+            return;
+          }
+          const lc = getLastCardTime();
+          const mins = lc ? (Date.now() - lc) / (60 * 1000) : 999;
+          if (mins >= 60) clickReward();
+        }, 60000);
+      }
     }
+  }
 
-    function getTodayCounts() {
-        const today = new Date().toLocaleDateString('ru-RU');
-        const items = getRewards();
-        return {
-            cards: items.filter(i => i.type === 'card' && new Date(i.time).toLocaleDateString('ru-RU') === today).length,
-            scrolls: items.filter(i => i.type === 'scroll' && new Date(i.time).toLocaleDateString('ru-RU') === today).length
-        };
+  function stopCardSpam() {
+    if (cardSpamInterval) {
+      clearInterval(cardSpamInterval);
+      cardSpamInterval = null;
     }
+  }
 
-    function getLastRewardTimeFromStorage() {
-        const items = getRewards();
-        if (items.length === 0) return null;
-        const last = items.reduce((a, b) => (a.time > b.time ? a : b));
-        return typeof last.time === 'number' ? last.time : null;
+ function checkReward() {
+  const cardsToday = getTodayCounts().cards;
+  const readBlock = document.querySelector('.wallet-panel__drop--read .wallet-panel__drop-text');
+  const m = readBlock?.textContent.match(/Глав\s+(\d+)\s+из\s+(\d+)/);
+  const chaptersDone = m ? +m[1] : 0;
+
+  if (chaptersDone >= 75) {
+    if (cardsToday >= 10) {
+      stopCardSpam();
+      return;
     }
+    startCardSpamIfNeeded();
+    return;
+  }
 
-    function getLastCardTimeFromStorage() {
-        const items = getRewards();
-        if (!items || items.length === 0) return null;
-        const cards = items.filter(i => i.type === 'card');
-        if (cards.length === 0) return null;
-        const lastCard = cards.reduce((a, b) => (a.time > b.time ? a : b));
-        return typeof lastCard.time === 'number' ? lastCard.time : null;
+  if (cardsToday >= 10) {
+    stopCardSpam();
+    return;
+  }
+
+  const rewardBlock = [...document.querySelectorAll('.wallet-panel__drop .wallet-panel__drop-text')]
+    .find(e => /Последняя награда/i.test(e.textContent));
+  let minutes = null;
+  if (rewardBlock) {
+    minutes = parseTime(rewardBlock.textContent.trim());
+  } else {
+    const lastRewardTime = getLastRewardTimeFromStorage();
+    if (typeof lastRewardTime === 'number') {
+      minutes = (Date.now() - lastRewardTime) / (60 * 1000);
     }
+  }
 
-    function isVisible(el) {
-        if (!el) return false;
-        const style = window.getComputedStyle(el);
-        const rect = el.getBoundingClientRect();
-        return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
+  if (minutes !== null &&
+      minutes >= TRIGGER_MINUTES &&
+      Date.now() - lastRewardClick > 10 * 60 * 1000) {
+    clickReward();
+  }
+}
+
+function clickAds() {
+  const block = document.querySelector('.wallet-panel__drop--watch_ads .wallet-panel__drop-text');
+  const m = block?.textContent.match(/(\d+)\s+из\s+(\d+)/);
+  if (!m) return;
+  const cur = +m[1], max = +m[2];
+  if (cur < max) {
+    const btn = findQuestButton('watch_ads');
+    if (btn) {
+      btn.click();
+      showPopup('Реклама');
     }
+  }
+}
 
-    function findQuestButton(name) {
-        const block = document.querySelector('.wallet-panel__drop--' + name);
-        const btn = block?.querySelector('.wallet-panel__drop-icon');
-        return isVisible(btn) ? btn : null;
+function mineLoop() {
+  const block = document.querySelector('.wallet-panel__drop--mine .wallet-panel__drop-text');
+  const m = block?.textContent.match(/Шахта\s+(\d+)\s+из\s+(\d+)/);
+  if (!m) return;
+  const cur = +m[1], max = +m[2];
+  if (cur < MINE_LIMIT && cur < max) {
+    const btn = findQuestButton('mine');
+    if (btn) {
+      btn.click();
+      showPopup('Шахта');
     }
+  }
+}
 
-    function getReadRewardsProgress() {
-        const block = document.querySelector('.wallet-panel__drop--read_rewards .wallet-panel__drop-text');
-        if (!block) return null;
-        const m = block.textContent.trim().match(/(\d+)\s*из\s*(\d+)/i);
-        return m ? { current: +m[1], total: +m[2], isComplete: +m[1] >= +m[2] } : null;
+function clickChatDiamond() {
+  const btn = findQuestButton('chat_diamond');
+  if (btn) {
+    btn.click();
+    showPopup('Алмаз за чат');
+    setTimeout(() => location.reload(), RELOAD_DELAY_MS);
+  }
+}
+
+function scheduleChatDiamond() {
+  const delay = (15 * 60 + Math.floor(Math.random() * 10)) * 1000;
+  setTimeout(() => {
+    clickChatDiamond();
+    scheduleChatDiamond();
+  }, delay);
+}
+
+function hasQuizToday() {
+  const stats = JSON.parse(localStorage.getItem("balance_stats") || "[]");
+  const today = getTodayKey();
+  const todayStats = stats.find(x => x.date === today);
+  if (!todayStats) return false;
+  return (todayStats.causes && todayStats.causes["Ежедневное прохождение квиза"] > 0);
+}
+
+function checkQuiz() {
+  if (!hasQuizToday()) {
+    window.location.href = "/quiz";
+  }
+}
+
+if (window.location.pathname.startsWith("/quiz")) {
+  let answer = "";
+  let clickCount = 0;
+  const MAX_CLICKS = 11;
+
+  $.ajaxSetup({
+    headers: { 'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content') },
+    complete: function (params) {
+      if ('question' in params.responseJSON) {
+        answer = params.responseJSON.question.correct_text || "";
+      }
     }
+  });
 
-    function getEventProgress() {
-        const block = document.querySelector('.wallet-panel__drop--event .wallet-panel__drop-text');
-        if (!block) return null;
-        const text = block.textContent.trim();
-        const m = text.match(/(\d+)\s*из\s*(\d+)/i);
-        if (m) {
-            return {
-                current: +m[1],
-                total: +m[2],
-                isComplete: +m[1] >= +m[2],
-                rawText: text
-            };
+  const observer = new MutationObserver(mutations => {
+    for (let mutation of mutations) {
+      if (mutation.type === 'childList') {
+        const items = document.querySelectorAll('.quiz__answer-item');
+        if (clickCount === 0 && items.length > 0 && !answer) {
+          items[0].click();
+          clickCount++;
+          return;
         }
-        return null;
-    }
-
-    function clickEventButtonOnce() {
-        const btn = findQuestButton('event');
-        if (btn && isVisible(btn)) {
-            btn.click();
-            showPopup('Event started');
-            console.log('[Loader] Event clicked once');
-            return true;
-        }
-        return false;
-    }
-
-    function stopEventMonitoring(reason) {
-        if (eventMonitorInterval) {
-            clearInterval(eventMonitorInterval);
-            eventMonitorInterval = null;
-        }
-        isMonitoringEvent = false;
-        console.log('[Loader] Event monitoring stopped: ' + reason);
-    }
-
-    function startEventMonitoring() {
-        if (isMonitoringEvent) return;
-        isMonitoringEvent = true;
-        console.log('[Loader] Event monitoring started');
-
-        eventMonitorInterval = setInterval(() => {
-            const progress = getEventProgress();
-            if (!progress) {
-                stopEventMonitoring('event disappeared');
-                return;
-            }
-            console.log('[Loader] Event progress: ' + progress.current + '/' + progress.total);
-            if (progress.isComplete) {
-                showPopup('Event completed!');
-                stopEventMonitoring('completed');
-                if (!localStorage.getItem("event_done_reload_" + getTodayKey())) {
-                    localStorage.setItem("event_done_reload_" + getTodayKey(), "true");
-                    setTimeout(() => location.reload(), 3000);
+        items.forEach(item => {
+          if (answer && item.innerText.trim() === answer.trim()) {
+            if (clickCount < MAX_CLICKS) {
+              setTimeout(() => {
+                item.click();
+                clickCount++;
+                if (clickCount >= MAX_CLICKS) {
+                  window.location.href = "/balance";
                 }
-                return;
+              }, 5000);
             }
-            const btn = findQuestButton('event');
-            if (btn && isVisible(btn)) {
-                clickEventButtonOnce();
+          }
+        });
+      }
+    }
+  });
+
+  const targetNode = document.querySelector('.quiz__answers');
+  if (targetNode) observer.observe(targetNode, { childList: true, subtree: true });
+}
+
+function clickUpdateDayButton() {
+  const buttons = document.querySelectorAll("button.button");
+  for (const btn of buttons) {
+    if (btn.textContent.includes("Обновить статистику за день")) {
+      btn.click();
+      return true;
+    }
+  }
+  return false;
+}
+
+if (window.location.pathname.startsWith("/balance")) {
+  setTimeout(() => {
+    ensureChaptersThenEvent();
+
+      if (getReadChapters() >= 10) {
+      setInterval(checkReward, CHECK_REWARD_INTERVAL);
+      setInterval(clickAds, ADS_INTERVAL);
+      setInterval(mineLoop, MINE_INTERVAL);
+      scheduleChatDiamond();
+
+      setTimeout(() => {
+        if (clickUpdateDayButton()) {
+          setTimeout(() => {
+            if (!hasQuizToday()) {
+              window.location.href = "/quiz";
             }
-        }, EVENT_MONITOR_INTERVAL);
-    }
-
-    function checkAndStartEvent() {
-        const progress = getEventProgress();
-        if (!progress || progress.isComplete) return;
-        if (clickEventButtonOnce()) startEventMonitoring();
-    }
-
-    function handleHardReloads() {
-        const todayReloadKey = 'mb_reload_done_' + getTodayKey();
-        if (sessionStorage.getItem(todayReloadKey)) return false;
-        const reloadState = sessionStorage.getItem('mb_reload_state') || '0';
-        if (reloadState === '0') {
-            sessionStorage.setItem('mb_reload_state', '1');
-            setTimeout(() => location.reload(true), 1000);
-            return true;
-        }
-        if (reloadState === '1') {
-            const delay = 5000 + Math.random() * 6000;
-            sessionStorage.setItem('mb_reload_state', '2');
-            setTimeout(() => location.reload(true), delay);
-            return true;
-        }
-        sessionStorage.setItem(todayReloadKey, 'true');
-        sessionStorage.removeItem('mb_reload_state');
-        return false;
-    }
-
-    function getCommentsQuestData() {
-        const block = document.querySelector('.wallet-panel__drop--comments .wallet-panel__drop-text');
-        if (!block) return null;
-        const m = block.textContent.trim().match(/(\d+)\s*из\s*(\d+)/i);
-        if (m) {
-            return {
-                current: parseInt(m[1], 10),
-                target: parseInt(m[2], 10),
-                isComplete: parseInt(m[1], 10) >= parseInt(m[2], 10)
-            };
-        }
-        return null;
-    }
-
-    function processCommentsQuest() {
-        const data = getCommentsQuestData();
-        if (!data) return;
-        if (data.isComplete) {
-            commentQuestActive = false;
-            commentsClickedThisSession = 0;
-            return;
-        }
-        commentQuestActive = true;
-        const needed = data.target - data.current;
-        if (commentsClickedThisSession >= needed) {
-            setTimeout(() => location.reload(), 2000);
-            return;
-        }
-        const btn = document.querySelector('.wallet-panel__drop--comments .wallet-panel__drop-icon');
-        if (btn && isVisible(btn)) {
-            btn.click();
-            commentsClickedThisSession++;
-            showPopup('Comment ' + commentsClickedThisSession + '/' + needed);
-            setTimeout(processCommentsQuest, 3000 + Math.random() * 3000);
+          }, 5000 + Math.floor(Math.random() * 5000));
         } else {
-            commentQuestActive = false;
+          if (!hasQuizToday()) {
+            window.location.href = "/quiz";
+          }
         }
+      }, 2000);
     }
-
-    function tryStartCommentQuest() {
-        if (commentQuestActive) return;
-        const rewards = getReadRewardsProgress();
-        if (rewards && rewards.current >= COMMENT_QUEST_START_AFTER_REWARDS) {
-            commentsClickedThisSession = 0;
-            setTimeout(processCommentsQuest, 2000);
-        }
-    }
-
-    function getReadChapters() {
-        const block = document.querySelector('.wallet-panel__drop--read .wallet-panel__drop-text');
-        if (!block) return -1;
-        const m = block.textContent.match(/(\d+)\s+из\s+(\d+)/);
-        return m ? +m[1] : -1;
-    }
-
-    function clickReadButton() {
-        const btn = findQuestButton('read');
-        if (btn) {
-            btn.click();
-            showPopup('Reading chapter');
-            return true;
-        }
-        return false;
-    }
-
-    function ensureChaptersThenEvent() {
-        const chapters = getReadChapters();
-        if (chapters === -1) {
-            setTimeout(ensureChaptersThenEvent, 3000);
-            return;
-        }
-        if (chapters < 5) {
-            clickReadButton();
-            const interval5 = setInterval(() => {
-                if (getReadChapters() >= 5) {
-                    clearInterval(interval5);
-                    location.reload();
-                }
-            }, 5000);
-            return;
-        }
-        if (chapters < 10) {
-            clickReadButton();
-            const interval10 = setInterval(() => {
-                if (getReadChapters() >= 10) {
-                    clearInterval(interval10);
-                    location.reload();
-                }
-            }, 5000);
-            return;
-        }
-        if (!localStorage.getItem("chapters_reload_done")) {
-            localStorage.setItem("chapters_reload_done", "true");
-            location.reload();
-        } else {
-            clickEventButtonOnce();
-        }
-    }
-
-    function claimRewardButton() {
-        const btn = findQuestButton('read_rewards');
-        if (btn && isVisible(btn)) {
-            btn.click();
-            showPopup('Reward');
-            tryStartCommentQuest();
-            return true;
-        }
-        return false;
-    }
-
-    function startCardFarming() {
-        if (isFarmingCard) return;
-        isFarmingCard = true;
-        claimRewardButton();
-        farmCardInterval = setInterval(() => {
-            const lastCardTime = getLastCardTimeFromStorage();
-            const minsPassed = lastCardTime ? (Date.now() - lastCardTime) / (1000 * 60) : 999;
-            if (minsPassed < 3) {
-                clearInterval(farmCardInterval);
-                farmCardInterval = null;
-                isFarmingCard = false;
-                return;
-            }
-            claimRewardButton();
-        }, 20000 + Math.random() * 20000);
-    }
-
-    function checkCardTimer() {
-        if (isFarmingCard) return;
-        const lastCardTime = getLastCardTimeFromStorage();
-        const minsPassed = lastCardTime ? (Date.now() - lastCardTime) / (1000 * 60) : 999;
-        if (minsPassed >= CARD_COOLDOWN_MINUTES + 1) {
-            startCardFarming();
-        }
-    }
-
-    function clickChatDiamond() {
-        const btn = findQuestButton('chat_diamond');
-        if (btn && isVisible(btn)) {
-            btn.click();
-            showPopup('Chat diamond');
-            setTimeout(() => location.reload(), RELOAD_DELAY_MS);
-            return true;
-        }
-        return false;
-    }
-
-    function scheduleChatDiamond() {
-        if (chatDiamondTimeout) clearTimeout(chatDiamondTimeout);
-        const minMs = CHAT_DIAMOND_MIN_MINUTES * 60 * 1000;
-        const maxMs = CHAT_DIAMOND_MAX_MINUTES * 60 * 1000;
-        const delay = minMs + Math.floor(Math.random() * (maxMs - minMs));
-        chatDiamondTimeout = setTimeout(() => { clickChatDiamond(); scheduleChatDiamond(); }, delay);
-    }
-
-    function getBattleQuestsStatus() {
-        const quests = [];
-        document.querySelectorAll('.battle-home__quest[data-daily-quest]').forEach(el => {
-            const title = el.querySelector('.battle-home__quest-info b')?.textContent.trim() || '';
-            const progress = el.querySelector('.battle-home__quest-progress span')?.textContent.trim() || '';
-            const isCompleted = el.classList.contains('battle-home__quest--completed');
-            BATTLE_REQUIRED_QUESTS.forEach(req => {
-                if (title.includes(req.text)) quests.push({ title, progress, isCompleted });
-            });
-        });
-        return quests;
-    }
-
-    function areBattleQuestsComplete() {
-        const quests = getBattleQuestsStatus();
-        return BATTLE_REQUIRED_QUESTS.every(req => {
-            const q = quests.find(x => x.title.includes(req.text));
-            return q && q.progress.replace(/\s+/g, ' ').trim() === req.required && q.isCompleted;
-        });
-    }
-
-    function collectBattleRewards() {
-        document.querySelectorAll('.battle-home__quest[data-daily-quest]').forEach(el => {
-            const btn = el.querySelector('button[type="button"]');
-            if (btn && !btn.disabled && btn.textContent.trim() !== 'Получено' && btn.textContent.trim() !== 'В процессе') {
-                btn.click();
-            }
-        });
-    }
-
-    function createBattleToggle() {
-        if (window.location.pathname !== '/battle') return;
-        const existing = document.getElementById('mb-battle-toggle');
-        if (existing) existing.remove();
-        const btn = document.createElement('button');
-        btn.id = 'mb-battle-toggle';
-        const updateBtnUI = () => {
-            const isStaying = localStorage.getItem('mb_stay_in_battle') === 'true';
-            btn.textContent = isStaying ? 'STAY' : 'RETURN';
-            btn.style.borderColor = isStaying ? '#0f0' : '#f00';
-            btn.style.background = isStaying ? '#1a3a1a' : '#3a1a1a';
-        };
-        updateBtnUI();
-        btn.style.cssText = 'position:fixed;top:20px;right:20px;padding:12px 20px;color:#fff;border:2px solid;border-radius:8px;cursor:pointer;z-index:9999;font-weight:bold;';
-        btn.onclick = () => {
-            const newState = localStorage.getItem('mb_stay_in_battle') !== 'true';
-            localStorage.setItem('mb_stay_in_battle', newState);
-            updateBtnUI();
-            if (newState && battleQuestCheckInterval) {
-                clearInterval(battleQuestCheckInterval);
-                battleQuestCheckInterval = null;
-            }
-        };
-        document.body.appendChild(btn);
-    }
-
-    function checkAndCollectBattleRewards() {
-        if (!areBattleQuestsComplete() || _battleReturnGuard) return;
-        _battleReturnGuard = true;
-        collectBattleRewards();
-        localStorage.setItem('battle_flow_' + getTodayKey(), 'true');
-        const isStaying = localStorage.getItem('mb_stay_in_battle') === 'true';
-        if (!isStaying) {
-            if (battleQuestCheckInterval) clearInterval(battleQuestCheckInterval);
-            setTimeout(() => window.location.replace('https://mangabuff.ru/balance'), 5000);
-        } else {
-            if (battleQuestCheckInterval) clearInterval(battleQuestCheckInterval);
-        }
-    }
-
-    function initBattlePage() {
-        createBattleToggle();
-        checkAndCollectBattleRewards();
-        battleQuestCheckInterval = setInterval(checkAndCollectBattleRewards, BATTLE_CHECK_INTERVAL);
-    }
-
-    function clickAds() {
-        const block = document.querySelector('.wallet-panel__drop--watch_ads .wallet-panel__drop-text');
-        const m = block?.textContent.match(/(\d+)\s+из\s+(\d+)/);
-        if (m && +m[1] < +m[2]) {
-            const btn = findQuestButton('watch_ads');
-            if (btn) { btn.click(); showPopup('Ads'); }
-        }
-    }
-
-    function mineLoop() {
-        const block = document.querySelector('.wallet-panel__drop--mine .wallet-panel__drop-text');
-        const m = block?.textContent.match(/(\d+)\s+из\s+(\d+)/);
-        if (m && +m[1] < MINE_LIMIT && +m[1] < +m[2]) {
-            const btn = findQuestButton('mine');
-            if (btn) { btn.click(); showPopup('Mine'); }
-        }
-    }
-
-    function hasQuizToday() {
-        const stats = JSON.parse(localStorage.getItem("balance_stats") || "[]");
-        const today = getTodayKey();
-        const todayStats = stats.find(x => x.date === today);
-        return !!(todayStats && todayStats.causes && todayStats.causes["Ежедневное прохождение квиза"] > 0);
-    }
-
-    function checkQuiz() {
-        if (!hasQuizToday()) window.location.href = "/quiz";
-    }
-
-    function clickUpdateDayButton() {
-        const buttons = document.querySelectorAll("button.button");
-        for (const btn of buttons) {
-            if (btn.textContent.includes("Обновить статистику за день")) {
-                btn.click();
-                return true;
-            }
-        }
-        return false;
-    }
-
-    function scheduleRandomWander() {
-        if (questFlowActive || isFarmingCard || commentQuestActive || isMonitoringEvent) {
-            setTimeout(scheduleRandomWander, 5 * 60 * 1000);
-            return;
-        }
-        const actions = [
-            { path: '/notifications', minDelay: 30*60*1000, maxDelay: 3*60*60*1000 },
-            { path: '/auctions', minDelay: 30*60*1000, maxDelay: 2*60*60*1000 },
-            { path: '/chat', minDelay: 40*60*1000, maxDelay: 2.5*60*60*1000 }
-        ];
-        const action = actions[Math.floor(Math.random() * actions.length)];
-        const delay = getRandomInt(action.minDelay, action.maxDelay);
-        setTimeout(() => {
-            sessionStorage.setItem('mb_wander_target', action.path);
-            window.location.href = action.path;
-        }, delay);
-    }
-
-    if (window.location.pathname === '/notifications' && sessionStorage.getItem('mb_wander_target') === '/notifications') {
-        sessionStorage.removeItem('mb_wander_target');
-        setTimeout(() => {
-            const readAllBtn = document.querySelector('.notifications__read-all-btn');
-            if (readAllBtn && isVisible(readAllBtn)) readAllBtn.click();
-            setTimeout(() => { window.location.href = '/balance'; }, getRandomInt(20000, 160000));
-        }, getRandomInt(60000, 180000));
-    }
-    else if (window.location.pathname === '/auctions' && sessionStorage.getItem('mb_wander_target') === '/auctions') {
-        sessionStorage.removeItem('mb_wander_target');
-        setTimeout(() => {
-            window.scrollBy({ top: getRandomInt(200, 600), behavior: 'smooth' });
-            setTimeout(() => {
-                const sortBtns = document.querySelectorAll('.comments__change-sort');
-                if (sortBtns.length > 0) sortBtns[Math.floor(Math.random() * sortBtns.length)].click();
-            }, 4000);
-            setTimeout(() => {
-                const textarea = document.querySelector('.comments__send-form textarea');
-                if (textarea) { textarea.focus(); setTimeout(() => textarea.blur(), 1500); }
-            }, 8000);
-        }, 3000);
-        setTimeout(() => { window.location.href = '/balance'; }, getRandomInt(150000, 210000));
-    }
-    else if (window.location.pathname === '/chat' && sessionStorage.getItem('mb_wander_target') === '/chat') {
-        sessionStorage.removeItem('mb_wander_target');
-        setTimeout(() => { window.scrollBy({ top: getRandomInt(300, 800), behavior: 'smooth' }); }, 4000);
-        setTimeout(() => { window.location.href = '/balance'; }, getRandomInt(60000, 180000));
-    }
-    else if (window.location.pathname.startsWith("/quiz")) {
-        let quizAnswer = "";
-        let quizClickCount = 0;
-        let isProcessingQuestion = false;
-
-        $.ajaxSetup({
-            headers: { 'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content') },
-            complete: function (params) {
-                if (params.responseJSON && 'question' in params.responseJSON) {
-                    quizAnswer = params.responseJSON.question.correct_text || "";
-                    console.log('[Loader] Quiz answer: ' + quizAnswer);
-                }
-            }
-        });
-
-        const observer = new MutationObserver(mutations => {
-            for (let mutation of mutations) {
-                if (mutation.type === 'childList' && !isProcessingQuestion) {
-                    const items = document.querySelectorAll('.quiz__answer-item');
-                    if (items.length > 0) {
-                        isProcessingQuestion = true;
-                        const readDelay = getRandomInt(10000, 27000);
-                        console.log('[Loader] Quiz reading delay: ' + Math.round(readDelay/1000) + 's');
-
-                        setTimeout(() => {
-                            if (quizClickCount === 0 && !quizAnswer) {
-                                items[0].click();
-                                quizClickCount++;
-                            } else if (quizAnswer) {
-                                let clicked = false;
-                                items.forEach(item => {
-                                    if (!clicked && item.innerText.trim() === quizAnswer.trim()) {
-                                        item.click();
-                                        clicked = true;
-                                        quizClickCount++;
-                                    }
-                                });
-                                if (!clicked) {
-                                    items[0].click();
-                                    quizClickCount++;
-                                }
-                            }
-                            setTimeout(() => {
-                                isProcessingQuestion = false;
-                                if (quizClickCount >= 11) {
-                                    window.location.href = "/balance";
-                                }
-                            }, 2000);
-                        }, readDelay);
-                    }
-                }
-            }
-        });
-
-        const targetNode = document.querySelector('.quiz__answers') || document.body;
-        observer.observe(targetNode, { childList: true, subtree: true });
-    }
-    else if (window.location.pathname.startsWith("/balance")) {
-        if (handleHardReloads()) return;
-        const initialDelay = getRandomInt(10000, 120000);
-        console.log('[Loader] Initial delay: ' + Math.round(initialDelay/1000) + 's');
-        setTimeout(() => {
-            setupCSRF();
-            ensureChaptersThenEvent();
-            if (getReadChapters() >= 10 || getReadChapters() === -1) {
-                setInterval(() => {
-                    if (!isFarmingCard && !commentQuestActive) claimRewardButton();
-                }, SCROLL_CHECK_MINUTES * 60 * 1000);
-                setInterval(checkCardTimer, 60 * 1000);
-                checkCardTimer();
-                setInterval(clickAds, ADS_INTERVAL);
-                setInterval(mineLoop, MINE_INTERVAL);
-                scheduleChatDiamond();
-                setInterval(tryStartCommentQuest, 10000);
-                setInterval(() => {
-                    if (!isMonitoringEvent) checkAndStartEvent();
-                }, 60000);
-                setTimeout(() => { if (!hasQuizToday()) checkQuiz(); }, 2000);
-                setTimeout(() => {
-                    if (clickUpdateDayButton()) {
-                        setTimeout(() => { if (!hasQuizToday()) window.location.href = "/quiz"; }, 5000 + Math.floor(Math.random() * 5000));
-                    } else { if (!hasQuizToday()) window.location.href = "/quiz"; }
-                }, 4000);
-                scheduleRandomWander();
-            }
-        }, initialDelay);
-    }
-    else if (window.location.pathname.startsWith("/battle")) {
-        setupCSRF();
-        initBattlePage();
-    }
-
+  }, 6000);
+}
+  
 })();
