@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MangaBuff Loader
 // @namespace    http://tampermonkey.net/
-// @version      1.12.4
+// @version      1.12.5
 // @description  Жёсткие перезагрузки + Задержка 10-120с + Чтение ТОЛЬКО до 10 глав + Ивент 1 клик + Битва + Имитация человека + ИСПРАВЛЕН КВИЗ (задержка 10-27с на ответ)
 // @match        https://mangabuff.ru/balance
 // @match        https://mangabuff.ru/quiz
@@ -11,19 +11,19 @@
 // @match        https://mangabuff.ru/auctions
 // @match        https://mangabuff.ru/chat
 // @grant        none
-@run-at       document-end
+// @run-at       document-end
 // @require      https://code.jquery.com/jquery-3.6.0.min.js
 // @require      https://cdn.jsdelivr.net/gh/X3JDie/mangabuff-scripts@main/mangabuff4
 // ==/UserScript==
 
 (function () {
     'use strict';
-    console.log("[Loader] 📦 Скрипт загружен. Версия 1.12.4 (Квиз: задержка 10-27 сек на обдумывание)");
+    console.log("[Loader] 📦 Скрипт загружен. Версия 1.12.5 (Квиз: задержка 10-27 сек на обдумывание)");
 
     // ==========================================
     // ⚙️ НАСТРОЙКИ
     // ==========================================
-    const CARD_COOLDOWN_MINUTES = 181;
+    const CARD_COOLDOWN_MINUTES = 61;
     const SCROLL_CHECK_MINUTES = 19;
     const EVENT_MONITOR_INTERVAL = 10000;
     // ==========================================
@@ -635,9 +635,8 @@
     else if (window.location.pathname.startsWith("/quiz")) {
         let quizAnswer = "";
         let quizClickCount = 0;
-        let isProcessingQuestion = false; // ЗАЩИТА от зависания и двойных кликов
+        let isProcessingQuestion = false;
 
-        // Перехватываем ответ сервера
         $.ajaxSetup({
             headers: { 'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content') },
             complete: function (params) {
@@ -653,20 +652,17 @@
                 if (mutation.type === 'childList' && !isProcessingQuestion) {
                     const items = document.querySelectorAll('.quiz__answer-item');
                     if (items.length > 0) {
-                        isProcessingQuestion = true; // Блокируем повторные срабатывания
+                        isProcessingQuestion = true;
                         
-                        // 🕒 ИМИТАЦИЯ ЧТЕНИЯ ВОПРОСА: 10-27 секунд
                         const readDelay = getRandomInt(10000, 27000);
                         console.log(`[Loader] ❓ Вижу варианты ответов. "Читаю" вопрос ${Math.round(readDelay/1000)} сек...`);
 
                         setTimeout(() => {
                             if (quizClickCount === 0 && !quizAnswer) {
-                                // Первый вопрос: ответа еще нет, кликаем наугад, чтобы спровоцировать ответ сервера
                                 console.log('[Loader] ❓ Первый вопрос, кликаю наугад для получения ответа...');
                                 items[0].click();
                                 quizClickCount++;
                             } else if (quizAnswer) {
-                                // Ответ известен, ищем его в DOM
                                 let clicked = false;
                                 items.forEach(item => {
                                     if (!clicked && item.innerText.trim() === quizAnswer.trim()) {
@@ -677,7 +673,6 @@
                                     }
                                 });
                                 
-                                // Fallback: если точное совпадение не найдено, кликаем первый вариант
                                 if (!clicked) {
                                     console.log('[Loader] ⚠️ Точное совпадение не найдено, кликаю первый вариант.');
                                     items[0].click();
@@ -685,7 +680,6 @@
                                 }
                             }
 
-                            // Сброс флага для следующего вопроса
                             setTimeout(() => {
                                 isProcessingQuestion = false;
                                 if (quizClickCount >= 11) {
@@ -700,7 +694,6 @@
             }
         });
 
-        // Наблюдаем за body на случай, если .quiz__answers еще не отрисован
         const targetNode = document.querySelector('.quiz__answers') || document.body;
         observer.observe(targetNode, { childList: true, subtree: true });
     }
