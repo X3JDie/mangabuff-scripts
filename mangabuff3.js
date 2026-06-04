@@ -379,28 +379,29 @@ if (window.location.pathname.startsWith("/balance")) {
   setTimeout(() => {
     ensureChaptersThenEvent();
 
-   if (isEventCompleted() && getReadChapters() >= 10) {
+    if (isEventCompleted() && getReadChapters() >= 10) {
       proceedEventCheck();
       if (getReadChapters() >= 10) {
-      setInterval(checkReward, CHECK_REWARD_INTERVAL);
-      setInterval(clickAds, ADS_INTERVAL);
-      setInterval(mineLoop, MINE_INTERVAL);
-      scheduleChatDiamond();
+        setInterval(checkReward, CHECK_REWARD_INTERVAL);
+        setInterval(clickAds, ADS_INTERVAL);
+        setInterval(mineLoop, MINE_INTERVAL);
+        scheduleChatDiamond();
 
-      setTimeout(() => {
-        if (clickUpdateDayButton()) {
-          setTimeout(() => {
+        setTimeout(() => {
+          if (clickUpdateDayButton()) {
+            setTimeout(() => {
+              if (!hasQuizToday()) {
+                window.location.href = "/quiz";
+              }
+            }, 5000 + Math.floor(Math.random() * 5000));
+          } else {
             if (!hasQuizToday()) {
               window.location.href = "/quiz";
             }
-          }, 5000 + Math.floor(Math.random() * 5000));
-        } else {
-          if (!hasQuizToday()) {
-            window.location.href = "/quiz";
           }
-        }
-      }, 2000);
-    }
+        }, 2000);
+      }
+    } 
   }, 6000);
 }
   
