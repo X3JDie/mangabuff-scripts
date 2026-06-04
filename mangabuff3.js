@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MangaBuff Loader
 // @namespace    http://tampermonkey.net/
-// @version      3.2.16
+// @version      3.2.17
 // @description  Читает главы через readFromQueue + Проверка награды по cursor: pointer + ТОЧНЫЙ подсчет конфет + Битва + Имитация активности
 // @match        https://mangabuff.ru/balance
 // @match        https://mangabuff.ru/quiz
@@ -18,7 +18,9 @@
 (function () {
   'use strict';
 
-  console.log("[Loader] 📦 Скрипт загружен v3.2.16 (Битва + Имитация активности)" );
+  const EVENT_CANDIES_LIMIT = 10; 
+
+  console.log(`[Loader] 📦 Скрипт загружен v3.2.17 (Лимит конфет: ${EVENT_CANDIES_LIMIT})` );
   
   const CHECK_REWARD_INTERVAL = 30000;
   const ADS_INTERVAL = 5000;
@@ -65,39 +67,45 @@
     return isVisible(btn) ? btn : null;
   }
 
-  // ✅ ПРОВЕРКА ИВЕНТА: сначала смотрим в read_rewards_container (от Balance Stats)
+  // ✅ ПРОВЕРКА ИВЕНТА: используем EVENT_CANDIES_LIMIT вместо хардкода 35
   function isEventCompleted() {
+    // 1. Проверяем блок наград от Balance Stats
     const headings = document.querySelectorAll('.read_rewards_container h2');
     for (let h2 of headings) {
       if (h2.textContent.includes('Конфеты')) {
         const match = h2.textContent.match(/Конфеты\s*\((\d+)\)/i);
         if (match) {
           const candies = parseInt(match[1], 10);
-          if (candies >= 35) {
+          if (candies >= EVENT_CANDIES_LIMIT) {
             if (!localStorage.getItem("event35_reload_done")) {
               localStorage.setItem("event35_reload_done", "true");
               location.reload();
             }
+            console.log(`[Loader] 🍬 Ивент выполнен! Собрано ${candies}/${EVENT_CANDIES_LIMIT} конфет`);
             return true; 
+          } else {
+            console.log(`[Loader] 🍬 Прогресс ивента: ${candies}/${EVENT_CANDIES_LIMIT}`);
           }
         }
       }
     }
 
-    // Fallback: проверяем через виджет квеста
+    // 2. Fallback: проверяем через виджет квеста
     const eventBlock = document.querySelector('.wallet-panel__drop--event .wallet-panel__drop-text');
     const text = eventBlock?.textContent.replace(/\s+/g, ' ').trim() || '';
     const m = text.match(/Event\s+(\d+)\s+из\s+(\d+)/i);
     if (m) {
       const current = +m[1];
       const total = +m[2];
-      if (current >= 35) {
+      if (current >= EVENT_CANDIES_LIMIT) {
         if (!localStorage.getItem("event35_reload_done")) {
           localStorage.setItem("event35_reload_done", "true");
           location.reload();
         }
+        console.log(`[Loader] 🍬 Ивент выполнен! Собрано ${current}/${EVENT_CANDIES_LIMIT} конфет`);
         return true;
       }
+      console.log(`[Loader] 🍬 Прогресс ивента (виджет): ${current}/${total} (цель: ${EVENT_CANDIES_LIMIT})`);
       return current >= total;
     }
 
@@ -502,7 +510,6 @@
           }
         }, 2000);
 
-        // 🚶 Запускаем имитацию активности
         scheduleRandomWander();
       }
     }, 6000);
