@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MangaBuff Loader
 // @namespace    http://tampermonkey.net/
-// @version      3.2.9
+// @version      3.2.10
 // @description  Подключает основной скрипт из локального файла
 // @match        https://mangabuff.ru/balance 
 // @match        https://mangabuff.ru/quiz
@@ -13,7 +13,7 @@
 (function () {
   'use strict';
 
-  console.log("[Loader] 📦Скрипт загружен из GitHub  Эвент окончен v3.2.9 (без комментариев)" );
+  console.log("[Loader] 📦Скрипт загружен из GitHub  Эвент окончен v3.2.10 (обновлены селекторы, без комментариев)" );
   
   const CHECK_REWARD_INTERVAL = 30000;
   const ADS_INTERVAL = 5000;
@@ -379,6 +379,8 @@ if (window.location.pathname.startsWith("/balance")) {
   setTimeout(() => {
     ensureChaptersThenEvent();
 
+   if (isEventCompleted() && getReadChapters() >= 10) {
+      proceedEventCheck();
       if (getReadChapters() >= 10) {
       setInterval(checkReward, CHECK_REWARD_INTERVAL);
       setInterval(clickAds, ADS_INTERVAL);
