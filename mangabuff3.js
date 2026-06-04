@@ -401,7 +401,7 @@ if (window.location.pathname.startsWith("/balance")) {
           }
         }, 2000);
       }
-    } 
+    }
   }, 6000);
 }
   
