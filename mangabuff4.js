@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         MangaBuff Loader
 // @namespace    http://tampermonkey.net/
-// @version      1.12.1
-// @description  Жёсткие перезагрузки + Задержка 10-120с + Защита от сжигания глав + Умные комментарии + Битва + 180мин карты + Имитация человека + АВТО-СБОР ИВЕНТА (1 клик + мониторинг)
+// @version      3.2.17
+// @description  Читает главы через readFromQueue + Проверка награды по cursor: pointer + ТОЧНЫЙ подсчет конфет + Битва + Имитация активности
 // @match        https://mangabuff.ru/balance
 // @match        https://mangabuff.ru/quiz
 // @match        https://mangabuff.ru/mine
@@ -13,816 +13,512 @@
 // @grant        none
 // @run-at       document-end
 // @require      https://code.jquery.com/jquery-3.6.0.min.js
-// @require      https://cdn.jsdelivr.net/gh/X3JDie/mangabuff-scripts@main/mangabuff4
 // ==/UserScript==
 
 (function () {
-    'use strict';
-    console.log("[Loader] 📦 Скрипт загружен. Версия 1.12.1 (Ивент: 1 клик + мониторинг)");
+  'use strict';
 
-    // ==========================================
-    // ⚙️ НАСТРОЙКИ
-    // ==========================================
-    const CARD_COOLDOWN_MINUTES = 61;
-    const SCROLL_CHECK_MINUTES = 19;
-    const MAX_FAILED_READ_ATTEMPTS = 5;
-    const EVENT_MONITOR_INTERVAL = 10000; // Проверка прогресса ивента каждые 10 сек
-    // ==========================================
+  const EVENT_CANDIES_LIMIT = 35; 
+  console.log(`[Loader] 📦 Скрипт загружен v3.2.17 (Лимит конфет: ${EVENT_CANDIES_LIMIT})` );
+  
+  const CHECK_REWARD_INTERVAL = 30000;
+  const ADS_INTERVAL = 5000;
+  const MINE_INTERVAL = 4000;
+  const MINE_LIMIT = 120;
+  const BATTLE_REQUIRED_QUESTS = [
+    { text: 'Провести 10 боев', required: '10/10' },
+    { text: 'Выиграть 11 боев', required: '11/11' }
+  ];
+  const BATTLE_CHECK_INTERVAL = 8000;
 
-    function setupCSRF() {
-        const token = document.querySelector('meta[name="csrf-token"]')?.content;
-        if (!token) return false;
-        $.ajaxSetup({
-            headers: { 'X-CSRF-TOKEN': token },
-            beforeSend: function(xhr) {
-                const current = document.querySelector('meta[name="csrf-token"]')?.content;
-                if (current && current !== token) xhr.setRequestHeader('X-CSRF-TOKEN', current);
+  let battleQuestCheckInterval = null;
+  let _battleReturnGuard = false;
+
+  function getTodayKey() {
+    return new Date().toLocaleDateString('ru-RU');
+  }
+
+  function getRandomInt(min, max) {
+    return Math.floor(Math.random() * (max - min + 1)) + min;
+  }
+
+  function showPopup(msg) {
+    const div = document.createElement('div');
+    div.textContent = msg;
+    Object.assign(div.style, {
+      position:'fixed',bottom:'20px',right:'20px',background:'#222',color:'#0f0',
+      padding:'10px 15px',borderRadius:'10px',boxShadow:'0 0 10px #0f0',fontSize:'14px',zIndex:9999
+    });
+    document.body.appendChild(div);
+    setTimeout(() => div.remove(), 3000);
+  }
+
+  function isVisible(el) {
+    if (!el) return false;
+    const style = window.getComputedStyle(el);
+    const rect = el.getBoundingClientRect();
+    return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
+  }
+
+  function findQuestButton(name) {
+    const block = document.querySelector(`.wallet-panel__drop--${name}`);
+    const btn = block?.querySelector('.wallet-panel__drop-icon');
+    return isVisible(btn) ? btn : null;
+  }
+
+  // ✅ ПРОВЕРКА ИВЕНТА: используем EVENT_CANDIES_LIMIT вместо хардкода 35
+  function isEventCompleted() {
+    // 1. Проверяем блок наград от Balance Stats
+    const headings = document.querySelectorAll('.read_rewards_container h2');
+    for (let h2 of headings) {
+      if (h2.textContent.includes('Конфеты')) {
+        const match = h2.textContent.match(/Конфеты\s*\((\d+)\)/i);
+        if (match) {
+          const candies = parseInt(match[1], 10);
+          if (candies >= EVENT_CANDIES_LIMIT) {
+            if (!localStorage.getItem("event35_reload_done")) {
+              localStorage.setItem("event35_reload_done", "true");
+              location.reload();
             }
-        });
-        return true;
-    }
-
-    const ADS_INTERVAL = 5000;
-    const MINE_INTERVAL = 4000;
-    const MINE_LIMIT = 120;
-    const RELOAD_DELAY_MS = 1500;
-    const COMMENT_QUEST_START_AFTER_REWARDS = 3;
-    const CHAT_DIAMOND_MIN_MINUTES = 15.5;
-    const CHAT_DIAMOND_MAX_MINUTES = 16;
-    const BATTLE_REQUIRED_QUESTS = [
-        { text: 'Провести 10 боев', required: '10/10' },
-        { text: 'Выиграть 11 боев', required: '11/11' }
-    ];
-    const BATTLE_CHECK_INTERVAL = 8000;
-
-    let chatDiamondTimeout = null;
-    let battleQuestCheckInterval = null;
-    let questFlowActive = false;
-    let _battleReturnGuard = false;
-    
-    let isFarmingCard = false;
-    let farmCardInterval = null;
-    
-    let commentsClickedThisSession = 0;
-    let commentQuestActive = false;
-
-    // 🎉 НОВОЕ: состояние ивента
-    let isMonitoringEvent = false;
-    let eventMonitorInterval = null;
-
-    function getRandomInt(min, max) {
-        return Math.floor(Math.random() * (max - min + 1)) + min;
-    }
-
-    function getTodayKey() { return new Date().toLocaleDateString('ru-RU'); }
-
-    function parseTime(text) {
-        if (!text) return null;
-        const h = text.match(/(\d+)\sч/);
-        const m = text.match(/(\d+)\sмин/);
-        const s = text.match(/(\d+)\s*сек/);
-        return (h ? +h[1] * 60 : 0) + (m ? +m[1] : 0) + (s ? +s[1] / 60 : 0);
-    }
-
-    function showPopup(msg) {
-        try {
-            const div = document.createElement('div');
-            div.textContent = msg;
-            div.style.position = 'fixed'; div.style.bottom = '20px'; div.style.right = '20px';
-            div.style.background = '#222'; div.style.color = '#0f0'; div.style.padding = '10px 15px';
-            div.style.borderRadius = '10px'; div.style.boxShadow = '0 0 10px #0f0';
-            div.style.fontSize = '14px'; div.style.zIndex = '9999'; div.style.pointerEvents = 'none';
-            if (document.body) {
-                document.body.appendChild(div);
-                setTimeout(() => { if (div.parentNode) div.parentNode.removeChild(div); }, 3000);
-            }
-        } catch (e) {}
-    }
-
-    function getRewards() {
-        try {
-            const raw = localStorage.getItem('read_rewards');
-            const obj = JSON.parse(raw);
-            return Array.isArray(obj?.items) ? obj.items : [];
-        } catch { return []; }
-    }
-
-    function getTodayCounts() {
-        const today = new Date().toLocaleDateString('ru-RU');
-        const items = getRewards();
-        return {
-            cards: items.filter(i => i.type === 'card' && new Date(i.time).toLocaleDateString('ru-RU') === today).length,
-            scrolls: items.filter(i => i.type === 'scroll' && new Date(i.time).toLocaleDateString('ru-RU') === today).length
-        };
-    }
-
-    function getLastRewardTimeFromStorage() {
-        const items = getRewards();
-        if (items.length === 0) return null;
-        const last = items.reduce((a, b) => (a.time > b.time ? a : b));
-        return typeof last.time === 'number' ? last.time : null;
-    }
-
-    function getLastCardTimeFromStorage() {
-        const items = getRewards();
-        if (!items || items.length === 0) return null;
-        const cards = items.filter(i => i.type === 'card');
-        if (cards.length === 0) return null;
-        const lastCard = cards.reduce((a, b) => (a.time > b.time ? a : b));
-        return typeof lastCard.time === 'number' ? lastCard.time : null;
-    }
-
-    function isVisible(el) {
-        if (!el) return false;
-        const style = window.getComputedStyle(el);
-        const rect = el.getBoundingClientRect();
-        return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
-    }
-
-    function findQuestButton(name) {
-        const block = document.querySelector(`.wallet-panel__drop--${name}`);
-        const btn = block?.querySelector('.wallet-panel__drop-icon');
-        return isVisible(btn) ? btn : null;
-    }
-
-    function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-
-    function getReadRewardsProgress() {
-        const block = document.querySelector('.wallet-panel__drop--read_rewards .wallet-panel__drop-text');
-        if (!block) return null;
-        const m = block.textContent.trim().match(/(\d+)\s*из\s*(\d+)/i);
-        return m ? { current: +m[1], total: +m[2], isComplete: +m[1] >= +m[2] } : null;
-    }
-
-    // ==========================================
-    // 🎉 АВТО-СБОР ИВЕНТА (1 клик + мониторинг)
-    // ==========================================
-    function getEventProgress() {
-        const block = document.querySelector('.wallet-panel__drop--event .wallet-panel__drop-text');
-        if (!block) return null; // Ивента нет на странице
-        const text = block.textContent.trim();
-        const m = text.match(/(\d+)\s*из\s*(\d+)/i);
-        if (m) {
-            return {
-                current: +m[1],
-                total: +m[2],
-                isComplete: +m[1] >= +m[2],
-                rawText: text
-            };
-        }
-        return null;
-    }
-
-    function clickEventButtonOnce() {
-        const btn = findQuestButton('event');
-        if (btn && isVisible(btn)) {
-            btn.click();
-            showPopup('🎉 Ивент запущен (1 клик)');
-            console.log('[Loader] 🎉 ✅ Кликнул по ивенту ОДИН раз. Теперь жду выполнения...');
-            return true;
-        }
-        console.log('[Loader] 🎉 Кнопка ивента не найдена или невидима');
-        return false;
-    }
-
-    function stopEventMonitoring(reason = 'неизвестно') {
-        if (eventMonitorInterval) {
-            clearInterval(eventMonitorInterval);
-            eventMonitorInterval = null;
-        }
-        isMonitoringEvent = false;
-        console.log(`[Loader] 🎉 🛑 Мониторинг ивента остановлен. Причина: ${reason}`);
-    }
-
-    function startEventMonitoring() {
-        if (isMonitoringEvent) {
-            console.log('[Loader] 🎉 Мониторинг ивента уже запущен');
-            return;
-        }
-
-        isMonitoringEvent = true;
-        console.log('[Loader] 🎉 🔍 ЗАПУСКАЮ МОНИТОРИНГ ИВЕНТА (проверка каждые 10 сек)...');
-
-        eventMonitorInterval = setInterval(() => {
-            const progress = getEventProgress();
-
-            if (!progress) {
-                console.log('[Loader] 🎉 Ивент исчез со страницы. Останавливаю мониторинг.');
-                stopEventMonitoring('ивент исчез');
-                return;
-            }
-
-            console.log(`[Loader] 🎉 Прогресс ивента: ${progress.current}/${progress.total}`);
-
-            if (progress.isComplete) {
-                console.log(`[Loader] 🎉 🎯 ИВЕНТ ВЫПОЛНЕН! Прогресс: ${progress.current}/${progress.total}`);
-                showPopup('🎉 Ивент собран!');
-                stopEventMonitoring('выполнен');
-                // Reload чтобы обновить страницу и забрать награды
-                if (!localStorage.getItem("event_done_reload_" + getTodayKey())) {
-                    localStorage.setItem("event_done_reload_" + getTodayKey(), "true");
-                    setTimeout(() => location.reload(), 3000);
-                }
-                return;
-            }
-
-            // Если ивент ещё не выполнен, но кнопка снова активна (например, после перезагрузки) — кликаем ещё раз
-            const btn = findQuestButton('event');
-            if (btn && isVisible(btn)) {
-                console.log('[Loader] 🎉 Кнопка ивента снова активна. Делаю повторный клик...');
-                clickEventButtonOnce();
-            }
-        }, EVENT_MONITOR_INTERVAL);
-    }
-
-    function checkAndStartEvent() {
-        console.log('[Loader] 🎉 Проверяю наличие активного ивента...');
-        const progress = getEventProgress();
-        
-        if (!progress) {
-            console.log('[Loader] 🎉 Ивент не активен (блок отсутствует).');
-            return;
-        }
-
-        if (progress.isComplete) {
-            console.log('[Loader] 🎉 Ивент уже выполнен.');
-            return;
-        }
-
-        console.log(`[Loader] 🎉 Ивент активен! Прогресс: ${progress.current}/${progress.total}.`);
-        
-        // Делаем ОДИН клик по кнопке ивента
-        const clicked = clickEventButtonOnce();
-        
-        if (clicked) {
-            // Запускаем мониторинг прогресса
-            startEventMonitoring();
-        }
-    }
-
-    // ==========================================
-    // ЖЁСТКИЕ ПЕРЕЗАГРУЗКИ (Аналог Ctrl+F5)
-    // ==========================================
-    function handleHardReloads() {
-        const todayReloadKey = `mb_reload_done_${getTodayKey()}`;
-        
-        if (sessionStorage.getItem(todayReloadKey)) {
-            console.log('[Loader] ✅ Жёсткие перезагрузки сегодня уже выполнены');
-            return false;
-        }
-
-        const reloadState = sessionStorage.getItem('mb_reload_state') || '0';
-        
-        if (reloadState === '0') {
-            console.log('[Loader] 🔄 Выполняю ПЕРВУЮ жёсткую перезагрузку (Ctrl+F5)...');
-            sessionStorage.setItem('mb_reload_state', '1');
-            setTimeout(() => location.reload(true), 1000);
-            return true;
-        }
-        
-        if (reloadState === '1') {
-            const delay = 5000 + Math.random() * 6000;
-            console.log(`[Loader] 🔄 Выполняю ВТОРУЮ жёсткую перезагрузку через ${Math.round(delay/1000)} сек...`);
-            sessionStorage.setItem('mb_reload_state', '2');
-            setTimeout(() => location.reload(true), delay);
-            return true;
-        }
-        
-        console.log('[Loader] ✅ Обе жёсткие перезагрузки выполнены. Продолжаем работу.');
-        sessionStorage.setItem(todayReloadKey, 'true');
-        sessionStorage.removeItem('mb_reload_state');
-        return false;
-    }
-
-    // ==========================================
-    // УМНАЯ ЛОГИКА КОММЕНТАРИЕВ
-    // ==========================================
-    function getCommentsQuestData() {
-        const block = document.querySelector('.wallet-panel__drop--comments .wallet-panel__drop-text');
-        if (!block) return null;
-        const m = block.textContent.trim().match(/(\d+)\s*из\s*(\d+)/i);
-        if (m) {
-            return {
-                current: parseInt(m[1], 10),
-                target: parseInt(m[2], 10),
-                isComplete: parseInt(m[1], 10) >= parseInt(m[2], 10)
-            };
-        }
-        return null;
-    }
-
-    function processCommentsQuest() {
-        const data = getCommentsQuestData();
-        if (!data) return;
-        
-        if (data.isComplete) {
-            console.log("[Loader] 💬 Квест комментариев выполнен!");
-            commentQuestActive = false;
-            commentsClickedThisSession = 0;
-            return;
-        }
-
-        commentQuestActive = true;
-        const needed = data.target - data.current;
-        
-        if (commentsClickedThisSession >= needed) {
-            console.log(`[Loader] 💬 Локально сделано ${commentsClickedThisSession} из ${needed}. Перезагружаю страницу для синхронизации...`);
-            setTimeout(() => location.reload(), 2000);
-            return;
-        }
-
-        const btn = document.querySelector('.wallet-panel__drop--comments .wallet-panel__drop-icon');
-        if (btn && isVisible(btn)) {
-            btn.click();
-            commentsClickedThisSession++;
-            showPopup(`Комментарий ${commentsClickedThisSession}/${needed}`);
-            console.log(`[Loader] 💬 Клик ${commentsClickedThisSession}. Ожидание...`);
-            setTimeout(processCommentsQuest, 3000 + Math.random() * 3000);
-        } else {
-            console.log("[Loader] 💬 Кнопка комментариев не найдена.");
-            commentQuestActive = false;
-        }
-    }
-
-    function tryStartCommentQuest() {
-        if (commentQuestActive) return;
-        const rewards = getReadRewardsProgress();
-        if (rewards && rewards.current >= COMMENT_QUEST_START_AFTER_REWARDS) {
-            console.log("[Loader] 💬 Набрано достаточно наград. Запускаю умный сбор комментариев...");
-            commentsClickedThisSession = 0;
-            setTimeout(processCommentsQuest, 2000);
-        }
-    }
-
-    // ==========================================
-    // БЕЗОПАСНОЕ ЧТЕНИЕ ГЛАВ (С ЗАЩИТОЙ ОТ СЖИГАНИЯ)
-    // ==========================================
-    function getReadChapters() {
-        const block = document.querySelector('.wallet-panel__drop--read .wallet-panel__drop-text');
-        if (!block) {
-            console.log('[Loader]  ⚠️ Блок чтения не найден в DOM');
-            return -1;
-        }
-        const m = block.textContent.match(/(\d+)\s+из\s+(\d+)/);
-        const result = m ? +m[1] : -1;
-        console.log(`[Loader] 📚 Счётчик глав: ${result === -1 ? 'не определён' : result}`);
-        return result;
-    }
-
-    function clickReadButton() {
-        const chapters = getReadChapters();
-        if (chapters === -1) {
-            console.log('[Loader] 📚 ⚠️ Не могу проверить счётчик, пропускаю клик');
-            return false;
-        }
-        if (chapters >= 75) {
-            console.log('[Loader] 📚 🛑 Лимит 75 глав достигнут. Останавливаюсь.');
-            return false;
-        }
-        const btn = findQuestButton('read');
-        if (btn) { 
-            btn.click(); 
-            showPopup('Чтение главы'); 
-            console.log(`[Loader]  ✅ Кликнул кнопку чтения. Текущий прогресс: ${chapters}/75`);
+            console.log(`[Loader] 🍬 Ивент выполнен! Собрано ${candies}/${EVENT_CANDIES_LIMIT} конфет`);
             return true; 
+          } else {
+            console.log(`[Loader] 🍬 Прогресс ивента: ${candies}/${EVENT_CANDIES_LIMIT}`);
+          }
         }
-        console.log('[Loader] 📚 ❌ Кнопка чтения не найдена или невидима');
-        return false;
+      }
     }
 
-    function ensureChaptersThenEvent() {
-        console.log('[Loader] 📚 === ЗАПУСК ЛОГИКИ ЧТЕНИЯ ГЛАВ ===');
-        
-        let currentChapters = getReadChapters();
-        
-        if (currentChapters === -1) {
-            console.log('[Loader] 📚 ⏳ DOM ещё не загрузился, повторю через 3 сек...');
-            setTimeout(ensureChaptersThenEvent, 3000);
-            return;
+    // 2. Fallback: проверяем через виджет квеста
+    const eventBlock = document.querySelector('.wallet-panel__drop--event .wallet-panel__drop-text');
+    const text = eventBlock?.textContent.replace(/\s+/g, ' ').trim() || '';
+    const m = text.match(/Event\s+(\d+)\s+из\s+(\d+)/i);
+    if (m) {
+      const current = +m[1];
+      const total = +m[2];
+      if (current >= EVENT_CANDIES_LIMIT) {
+        if (!localStorage.getItem("event35_reload_done")) {
+          localStorage.setItem("event35_reload_done", "true");
+          location.reload();
         }
-        
-        if (currentChapters >= 75) {
-            console.log('[Loader] 📚 🛑 Лимит 75 глав уже достигнут. Пропускаю чтение.');
-            return;
+        console.log(`[Loader] 🍬 Ивент выполнен! Собрано ${current}/${EVENT_CANDIES_LIMIT} конфет`);
+        return true;
+      }
+      console.log(`[Loader] 🍬 Прогресс ивента (виджет): ${current}/${total} (цель: ${EVENT_CANDIES_LIMIT})`);
+      return current >= total;
+    }
+
+    return false;
+  }
+
+  function proceedEventCheck() {
+    if (!isEventCompleted()) {
+      clickEventButton();
+    } else {
+      if (!localStorage.getItem("event_reload_done")) {
+        localStorage.setItem("event_reload_done", "true");
+        location.reload();
+      } else {
+        console.log("[Loader] Эвент собран, reload уже был");
+      }
+    }
+  }
+
+  function clickEventButton() {
+    const btn = findQuestButton('event');
+    if (btn) {
+      btn.click();
+      showPopup('Event');
+    }
+  }
+  
+  function getReadChapters() {
+    const block = document.querySelector('.wallet-panel__drop--read .wallet-panel__drop-text');
+    const m = block?.textContent.match(/(\d+)\s+из\s+(\d+)/);
+    return m ? +m[1] : 0;
+  }
+
+  async function readOneChapterDirect() {
+    if (typeof window.readFromQueue === 'function') {
+      try {
+        const res = await window.readFromQueue();
+        if (res) {
+          console.log('[Loader] 📚 Глава прочитана через readFromQueue');
+          return true;
         }
-        
-        if (currentChapters >= 10) {
-            console.log(`[Loader]  ✅ Уже прочитано ${currentChapters} глав (>=10). Перехожу к Event.`);
-            if (!localStorage.getItem("chapters_reload_done")) {
-                localStorage.setItem("chapters_reload_done", "true");
-                setTimeout(() => location.reload(), 3000);
-            }
-            return;
-        }
-
-        console.log(`[Loader] 📚 📖 Начинаю чтение. Текущий прогресс: ${currentChapters}/10`);
-        
-        clickReadButton();
-        let lastKnownChapters = currentChapters;
-        let failedAttempts = 0;
-        
-        const readInterval = setInterval(() => {
-            currentChapters = getReadChapters();
-            
-            if (currentChapters === -1) {
-                console.log('[Loader]  ⚠️ DOM временно недоступен, жду...');
-                return;
-            }
-            
-            if (currentChapters >= 10) {
-                clearInterval(readInterval);
-                console.log(`[Loader] 📚 🎯 ЦЕЛЬ ДОСТИГНУТА! Прочитано ${currentChapters} глав.`);
-                if (!localStorage.getItem("chapters_reload_done")) {
-                    localStorage.setItem("chapters_reload_done", "true");
-                    setTimeout(() => location.reload(), 3000);
-                }
-                return;
-            }
-            
-            if (currentChapters === lastKnownChapters) {
-                failedAttempts++;
-                console.log(`[Loader] 📚 ⚠️ Прогресс не изменился: ${currentChapters}. Неудачная попытка ${failedAttempts}/${MAX_FAILED_READ_ATTEMPTS}`);
-                
-                if (failedAttempts >= MAX_FAILED_READ_ATTEMPTS) {
-                    console.log(`[Loader] 📚 🛑 СЛИШКОМ МНОГО НЕУДАЧ (${failedAttempts}). Останавливаю чтение, чтобы не сжечь лимит.`);
-                    clearInterval(readInterval);
-                    showPopup('Чтение остановлено (сервер не отвечает)');
-                    return;
-                }
-                
-                console.log('[Loader] 📚 Повторный клик...');
-                clickReadButton();
-            } else {
-                console.log(`[Loader]  ✅ Прогресс обновлён: ${lastKnownChapters} → ${currentChapters}`);
-                lastKnownChapters = currentChapters;
-                failedAttempts = 0;
-            }
-        }, 15000 + Math.random() * 5000);
+      } catch (e) {
+        console.log('[Loader] 📚 readFromQueue ошибка:', e.message);
+      }
     }
-
-    // ==========================================
-    // КАРТЫ И СВИТКИ
-    // ==========================================
-    function claimRewardButton() {
-        const btn = findQuestButton('read_rewards');
-        if (btn && isVisible(btn)) {
-            btn.click();
-            showPopup('Награда');
-            tryStartCommentQuest();
-            return true;
-        }
-        return false;
+    const btn = findQuestButton('read');
+    if (btn) {
+      btn.click();
+      showPopup('Чтение главы (fallback)');
+      return true;
     }
+    return false;
+  }
 
-    function startCardFarming() {
-        if (isFarmingCard) return;
-        isFarmingCard = true;
-        console.log('[Loader]  Запускаем быстрый сбор карты...');
-        claimRewardButton();
-
-        farmCardInterval = setInterval(() => {
-            const lastCardTime = getLastCardTimeFromStorage();
-            const minsPassed = lastCardTime ? (Date.now() - lastCardTime) / (1000 * 60) : 999;
-            if (minsPassed < 3) {
-                console.log('[Loader] 🃏 Карта получена! Останавливаем сбор.');
-                clearInterval(farmCardInterval);
-                farmCardInterval = null;
-                isFarmingCard = false;
-                return;
-            }
-            console.log('[Loader] 🃏 Карта еще не выпала, повторяем клик...');
-            claimRewardButton();
-        }, 20000 + Math.random() * 20000);
-    }
-
-    function checkCardTimer() {
-        if (isFarmingCard) return;
-        const lastCardTime = getLastCardTimeFromStorage();
-        const minsPassed = lastCardTime ? (Date.now() - lastCardTime) / (1000 * 60) : 999;
-        if (minsPassed >= CARD_COOLDOWN_MINUTES + 1) {
-            console.log(`[Loader] ⏳ Прошло ${Math.floor(minsPassed)} мин с последней КАРТЫ. Забираем!`);
-            startCardFarming();
-        }
-    }
-
-    // ==========================================
-    // АЛМАЗ ЗА ЧАТ
-    // ==========================================
-    function clickChatDiamond() {
-        const btn = findQuestButton('chat_diamond');
-        if (btn && isVisible(btn)) {
-            btn.click();
-            showPopup('Алмаз за чат');
-            setTimeout(() => location.reload(), RELOAD_DELAY_MS);
-            return true;
-        }
-        return false;
-    }
-
-    function scheduleChatDiamond() {
-        if (chatDiamondTimeout) clearTimeout(chatDiamondTimeout);
-        const minMs = CHAT_DIAMOND_MIN_MINUTES * 60 * 1000;
-        const maxMs = CHAT_DIAMOND_MAX_MINUTES * 60 * 1000;
-        const delay = minMs + Math.floor(Math.random() * (maxMs - minMs));
-        chatDiamondTimeout = setTimeout(() => { clickChatDiamond(); scheduleChatDiamond(); }, delay);
-    }
-
-    // ==========================================
-    // БИТВА
-    // ==========================================
-    function getBattleQuestsStatus() {
-        const quests = [];
-        document.querySelectorAll('.battle-home__quest[data-daily-quest]').forEach(el => {
-            const title = el.querySelector('.battle-home__quest-info b')?.textContent.trim() || '';
-            const progress = el.querySelector('.battle-home__quest-progress span')?.textContent.trim() || '';
-            const isCompleted = el.classList.contains('battle-home__quest--completed');
-            BATTLE_REQUIRED_QUESTS.forEach(req => {
-                if (title.includes(req.text)) quests.push({ title, progress, isCompleted });
-            });
-        });
-        return quests;
-    }
-
-    function areBattleQuestsComplete() {
-        const quests = getBattleQuestsStatus();
-        return BATTLE_REQUIRED_QUESTS.every(req => {
-            const q = quests.find(x => x.title.includes(req.text));
-            return q && q.progress.replace(/\s+/g, ' ').trim() === req.required && q.isCompleted;
-        });
-    }
-
-    function collectBattleRewards() {
-        document.querySelectorAll('.battle-home__quest[data-daily-quest]').forEach(el => {
-            const btn = el.querySelector('button[type="button"]');
-            if (btn && !btn.disabled && btn.textContent.trim() !== 'Получено' && btn.textContent.trim() !== 'В процессе') {
-                btn.click();
-            }
-        });
-    }
-
-    function createBattleToggle() {
-        if (window.location.pathname !== '/battle') return;
-        const existing = document.getElementById('mb-battle-toggle');
-        if (existing) existing.remove();
-
-        const btn = document.createElement('button');
-        btn.id = 'mb-battle-toggle';
-        
-        const updateBtnUI = () => {
-            const isStaying = localStorage.getItem('mb_stay_in_battle') === 'true';
-            btn.textContent = isStaying ? '🔓 ОСТАТЬСЯ (Возврат ОТКЛЮЧЕН)' : '🔒 АВТО-ВОЗВРАТ на баланс';
-            btn.style.borderColor = isStaying ? '#0f0' : '#f00';
-            btn.style.background = isStaying ? '#1a3a1a' : '#3a1a1a';
-            btn.style.boxShadow = isStaying ? '0 0 15px #0f0' : '0 0 15px #f00';
-        };
-        
-        updateBtnUI();
-        btn.style.cssText = 'position:fixed;top:20px;right:20px;padding:12px 20px;color:#fff;border:2px solid;border-radius:8px;cursor:pointer;z-index:9999;font-size:14px;font-weight:bold;transition:0.2s;';
-        
-        btn.onclick = () => {
-            const newState = localStorage.getItem('mb_stay_in_battle') !== 'true';
-            localStorage.setItem('mb_stay_in_battle', newState);
-            updateBtnUI();
-            showPopup(newState ? 'Режим: ОСТАТЬСЯ в битве' : 'Режим: Авто-возврат включен');
-            console.log(`[Loader] ️ Режим битвы изменен на: ${newState ? 'Остаться' : 'Авто-возврат'}`);
-            
-            if (newState && battleQuestCheckInterval) {
-                clearInterval(battleQuestCheckInterval);
-                battleQuestCheckInterval = null;
-                console.log('[Loader] ⚔️ Таймер возврата принудительно остановлен переключателем.');
-            }
-        };
-        
-        document.body.appendChild(btn);
-    }
-
-    function checkAndCollectBattleRewards() {
-        if (!areBattleQuestsComplete() || _battleReturnGuard) return;
-        
-        _battleReturnGuard = true;
-        collectBattleRewards();
-        localStorage.setItem(`battle_flow_${getTodayKey()}`, 'true');
-        window._battle_done = true;
-
-        const isStaying = localStorage.getItem('mb_stay_in_battle') === 'true';
-        console.log(`[Loader] ️ Квесты выполнены. Текущий режим: ${isStaying ? 'ОСТАТЬСЯ' : 'ВОЗВРАТ'}`);
-
-        if (!isStaying) {
-            console.log('[Loader] 🔄 Возврат на /balance через 5 сек...');
-            if (battleQuestCheckInterval) {
-                clearInterval(battleQuestCheckInterval);
-                battleQuestCheckInterval = null;
-            }
-            setTimeout(() => {
-                window.location.replace('https://mangabuff.ru/balance');
-            }, 5000);
-        } else {
-            console.log('[Loader] ⏸️ Режим "Остаться" активен. Редирект отменен.');
-            if (battleQuestCheckInterval) {
-                clearInterval(battleQuestCheckInterval);
-                battleQuestCheckInterval = null;
-            }
-        }
-    }
-
-    function initBattlePage() {
-        createBattleToggle();
-        checkAndCollectBattleRewards();
-        battleQuestCheckInterval = setInterval(checkAndCollectBattleRewards, BATTLE_CHECK_INTERVAL);
-    }
-
-    // ==========================================
-    // ПРОЧИЕ КВЕСТЫ
-    // ==========================================
-    function clickAds() {
-        const block = document.querySelector('.wallet-panel__drop--watch_ads .wallet-panel__drop-text');
-        const m = block?.textContent.match(/(\d+)\s+из\s+(\d+)/);
-        if (!m) return;
-        if (+m[1] < +m[2]) {
-            const btn = findQuestButton('watch_ads');
-            if (btn) { btn.click(); showPopup('Реклама'); }
-        }
-    }
-
-    function mineLoop() {
-        const block = document.querySelector('.wallet-panel__drop--mine .wallet-panel__drop-text');
-        const m = block?.textContent.match(/(\d+)\s+из\s+(\d+)/);
-        if (!m) return;
-        if (+m[1] < MINE_LIMIT && +m[1] < +m[2]) {
-            const btn = findQuestButton('mine');
-            if (btn) { btn.click(); showPopup('Шахта'); }
-        }
-    }
-
-    function hasQuizToday() {
-        const stats = JSON.parse(localStorage.getItem("balance_stats") || "[]");
-        const today = getTodayKey();
-        const todayStats = stats.find(x => x.date === today);
-        if (!todayStats) return false;
-        return (todayStats.causes && todayStats.causes["Ежедневное прохождение квиза"] > 0);
-    }
-
-    function checkQuiz() {
-        if (!hasQuizToday()) window.location.href = "/quiz";
-    }
-
-    function clickUpdateDayButton() {
-        const buttons = document.querySelectorAll("button.button");
-        for (const btn of buttons) {
-            if (btn.textContent.includes("Обновить статистику за день")) {
-                btn.click();
-                return true;
-            }
-        }
-        return false;
-    }
-
-    // ==========================================
-    // ИМИТАЦИЯ ЧЕЛОВЕКА
-    // ==========================================
-    function scheduleRandomWander() {
-        if (questFlowActive || isFarmingCard || commentQuestActive || isMonitoringEvent) {
-            setTimeout(scheduleRandomWander, 5 * 60 * 1000);
-            return;
-        }
-
-        const actions = [
-            { path: '/notifications', minDelay: 30*60*1000, maxDelay: 3*60*60*1000 },
-            { path: '/auctions', minDelay: 30*60*1000, maxDelay: 2*60*60*1000 },
-            { path: '/chat', minDelay: 40*60*1000, maxDelay: 2.5*60*60*1000 }
-        ];
-        const action = actions[Math.floor(Math.random() * actions.length)];
-        const delay = getRandomInt(action.minDelay, action.maxDelay);
-
-        console.log(`[Loader] 🚶 Планирую имитацию (${action.path}) через ~${Math.round(delay/60000)} мин.`);
-        setTimeout(() => {
-            console.log(`[Loader] 🚶 Перехожу на ${action.path}...`);
-            sessionStorage.setItem('mb_wander_target', action.path);
-            window.location.href = action.path;
-        }, delay);
-    }
-
-    // ==========================================
-    // МАРШРУТИЗАЦИЯ ПО СТРАНИЦАМ
-    // ==========================================
+  async function readChaptersUpTo(target) {
+    let chapters = getReadChapters();
+    console.log(`[Loader] 📚 Начинаю чтение. Текущий прогресс: ${chapters}/${target}`);
     
-    if (window.location.pathname === '/notifications' && sessionStorage.getItem('mb_wander_target') === '/notifications') {
-        sessionStorage.removeItem('mb_wander_target');
-        setTimeout(() => {
-            const readAllBtn = document.querySelector('.notifications__read-all-btn');
-            if (readAllBtn && isVisible(readAllBtn)) readAllBtn.click();
-            setTimeout(() => { window.location.href = '/balance'; }, getRandomInt(20000, 160000));
-        }, getRandomInt(60000, 180000));
+    while (chapters < target) {
+      const success = await readOneChapterDirect();
+      if (!success) {
+        console.log('[Loader] 📚 Не удалось прочитать главу, жду...');
+        await new Promise(r => setTimeout(r, 5000));
+        continue;
+      }
+      
+      await new Promise(r => setTimeout(r, 10000));
+      chapters = getReadChapters();
+      console.log(`[Loader] 📚 Прогресс: ${chapters}/${target}`);
+      
+      if (chapters >= target) {
+        console.log(`[Loader] 📚 ✅ Достигнуто ${target} глав!`);
+        return;
+      }
     }
-    else if (window.location.pathname === '/auctions' && sessionStorage.getItem('mb_wander_target') === '/auctions') {
-        sessionStorage.removeItem('mb_wander_target');
-        setTimeout(() => {
-            window.scrollBy({ top: getRandomInt(200, 600), behavior: 'smooth' });
-            setTimeout(() => {
-                const sortBtns = document.querySelectorAll('.comments__change-sort');
-                if (sortBtns.length > 0) sortBtns[Math.floor(Math.random() * sortBtns.length)].click();
-            }, 4000);
-            setTimeout(() => {
-                const textarea = document.querySelector('.comments__send-form textarea');
-                if (textarea) { textarea.focus(); setTimeout(() => textarea.blur(), 1500); }
-            }, 8000);
-        }, 3000);
-        setTimeout(() => { window.location.href = '/balance'; }, getRandomInt(150000, 210000));
-    }
-    else if (window.location.pathname === '/chat' && sessionStorage.getItem('mb_wander_target') === '/chat') {
-        sessionStorage.removeItem('mb_wander_target');
-        setTimeout(() => { window.scrollBy({ top: getRandomInt(300, 800), behavior: 'smooth' }); }, 4000);
-        setTimeout(() => { window.location.href = '/balance'; }, getRandomInt(60000, 180000));
-    }
-    else if (window.location.pathname.startsWith("/quiz")) {
-        let answer = "";
-        let clickCount = 0;
-        $.ajaxSetup({
-            headers: { 'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content') },
-            complete: function (params) {
-                if ('question' in params.responseJSON) answer = params.responseJSON.question.correct_text || "";
-            }
-        });
-        const observer = new MutationObserver(mutations => {
-            for (let mutation of mutations) {
-                if (mutation.type === 'childList') {
-                    const items = document.querySelectorAll('.quiz__answer-item');
-                    if (clickCount === 0 && items.length > 0 && !answer) { items[0].click(); clickCount++; return; }
-                    items.forEach(item => {
-                        if (answer && item.innerText.trim() === answer.trim()) {
-                            if (clickCount < 11) {
-                                setTimeout(() => {
-                                    item.click(); clickCount++;
-                                    if (clickCount >= 11) window.location.href = "/balance";
-                                }, 5000);
-                            }
-                        }
-                    });
-                }
-            }
-        });
-        const targetNode = document.querySelector('.quiz__answers');
-        if (targetNode) observer.observe(targetNode, { childList: true, subtree: true });
-    }
-    else if (window.location.pathname.startsWith("/balance")) {
-        // ЖЁСТКИЕ ПЕРЕЗАГРУЗКИ
-        if (handleHardReloads()) {
-            console.log('[Loader] ⏸️ Ожидаю перезагрузку страницы...');
-            return;
-        }
-        
-        // ЗАДЕРЖКА 10-120 СЕКУНД ПЕРЕД НАЧАЛОМ ДЕЙСТВИЙ
-        const initialDelay = getRandomInt(10000, 120000);
-        console.log(`[Loader] ⏳ Задержка перед началом действий: ${Math.round(initialDelay/1000)} секунд (имитация человека)...`);
-        
-        setTimeout(() => {
-            setupCSRF();
-            
-            console.log('[Loader] 🚀 Запуск основной логики /balance');
-            
-            // 🎉 ПРИОРИТЕТ №1: Если есть ивент — запускаем его СРАЗУ (1 клик + мониторинг)
-            checkAndStartEvent();
-            
-            // Чтение глав (параллельно с ивентом)
-            ensureChaptersThenEvent();
-            
-            if (getReadChapters() >= 10 || getReadChapters() === -1) {
-                console.log(`[Loader] ✅ Квест 10 глав выполнен или пропускаем. Запускаем сбор наград...`);
-                
-                setInterval(() => { 
-                    if (!isFarmingCard && !commentQuestActive) claimRewardButton(); 
-                }, SCROLL_CHECK_MINUTES * 60 * 1000);
-                
-                setInterval(checkCardTimer, 60 * 1000);
-                checkCardTimer();
+  }
 
-                setInterval(clickAds, ADS_INTERVAL);
-                setInterval(mineLoop, MINE_INTERVAL);
-                scheduleChatDiamond();
-                setInterval(tryStartCommentQuest, 10000);
-                
-                // 🎉 Периодическая проверка ивента (если мониторинг остановился, но ивент ещё активен)
-                setInterval(() => {
-                    if (!isMonitoringEvent) {
-                        console.log('[Loader] 🎉 Повторная проверка ивента...');
-                        checkAndStartEvent();
-                    }
-                }, 60000);
-                
-                setTimeout(() => { if (!hasQuizToday()) checkQuiz(); }, 2000);
+  async function ensureChaptersThenEvent() {
+    const chapters = getReadChapters();
+    console.log(`[Loader] 📚 Текущий прогресс: ${chapters} глав`);
+
+    if (chapters < 10) {
+      await readChaptersUpTo(10);
+    }
+
+    if (!localStorage.getItem("chapters_reload_done")) {
+      console.log('[Loader] 📚 ✅ Главы >= 10. Делаю reload...');
+      localStorage.setItem("chapters_reload_done", "true");
+      location.reload();
+    } else {
+      console.log("[Loader] 📚 Главы >= 10, reload уже был. Кликаю ивент.");
+      clickEventButton();
+    }
+  }
+
+  function checkAndClaimRewards() {
+    const rewardIcon = document.querySelector('.wallet-panel__drop--read_rewards .wallet-panel__drop-icon');
+    if (!rewardIcon || !isVisible(rewardIcon)) return;
+
+    const style = window.getComputedStyle(rewardIcon);
+    if (style.cursor === 'pointer') {
+      console.log('[Loader] 🎁 Награда доступна (cursor: pointer)! Забираем.');
+      rewardIcon.click();
+      showPopup('Награда за чтение');
+    } else {
+      console.log('[Loader] 🎁 Награда ещё не готова. Пропускаем.');
+    }
+  }
+
+  function clickAds() {
+    const block = document.querySelector('.wallet-panel__drop--watch_ads .wallet-panel__drop-text');
+    const m = block?.textContent.match(/(\d+)\s+из\s+(\d+)/);
+    if (!m) return;
+    const cur = +m[1], max = +m[2];
+    if (cur < max) {
+      const btn = findQuestButton('watch_ads');
+      if (btn) {
+        btn.click();
+        showPopup('Реклама');
+      }
+    }
+  }
+
+  function mineLoop() {
+    const block = document.querySelector('.wallet-panel__drop--mine .wallet-panel__drop-text');
+    const m = block?.textContent.match(/Шахта\s+(\d+)\s+из\s+(\d+)/);
+    if (!m) return;
+    const cur = +m[1], max = +m[2];
+    if (cur < MINE_LIMIT && cur < max) {
+      const btn = findQuestButton('mine');
+      if (btn) {
+        btn.click();
+        showPopup('Шахта');
+      }
+    }
+  }
+
+  function hasQuizToday() {
+    const stats = JSON.parse(localStorage.getItem("balance_stats") || "[]");
+    const today = getTodayKey();
+    const todayStats = stats.find(x => x.date === today);
+    if (!todayStats) return false;
+    return (todayStats.causes && todayStats.causes["Ежедневное прохождение квиза"] > 0);
+  }
+
+  function checkQuiz() {
+    if (!hasQuizToday()) {
+      window.location.href = "/quiz";
+    }
+  }
+
+  // ==========================================
+  // ⚔️ БИТВА
+  // ==========================================
+  function getBattleQuestsStatus() {
+    const quests = [];
+    document.querySelectorAll('.battle-home__quest[data-daily-quest]').forEach(el => {
+      const title = el.querySelector('.battle-home__quest-info b')?.textContent.trim() || '';
+      const progress = el.querySelector('.battle-home__quest-progress span')?.textContent.trim() || '';
+      const isCompleted = el.classList.contains('battle-home__quest--completed');
+      BATTLE_REQUIRED_QUESTS.forEach(req => {
+        if (title.includes(req.text)) quests.push({ title, progress, isCompleted });
+      });
+    });
+    return quests;
+  }
+
+  function areBattleQuestsComplete() {
+    const quests = getBattleQuestsStatus();
+    return BATTLE_REQUIRED_QUESTS.every(req => {
+      const q = quests.find(x => x.title.includes(req.text));
+      return q && q.progress.replace(/\s+/g, ' ').trim() === req.required && q.isCompleted;
+    });
+  }
+
+  function collectBattleRewards() {
+    document.querySelectorAll('.battle-home__quest[data-daily-quest]').forEach(el => {
+      const btn = el.querySelector('button[type="button"]');
+      if (btn && !btn.disabled && btn.textContent.trim() !== 'Получено' && btn.textContent.trim() !== 'В процессе') {
+        btn.click();
+      }
+    });
+  }
+
+  function createBattleToggle() {
+    if (window.location.pathname !== '/battle') return;
+    const existing = document.getElementById('mb-battle-toggle');
+    if (existing) existing.remove();
+
+    const btn = document.createElement('button');
+    btn.id = 'mb-battle-toggle';
+    
+    const updateBtnUI = () => {
+      const isStaying = localStorage.getItem('mb_stay_in_battle') === 'true';
+      btn.textContent = isStaying ? '🔓 ОСТАТЬСЯ (Возврат ОТКЛЮЧЕН)' : '🔒 АВТО-ВОЗВРАТ на баланс';
+      btn.style.borderColor = isStaying ? '#0f0' : '#f00';
+      btn.style.background = isStaying ? '#1a3a1a' : '#3a1a1a';
+      btn.style.boxShadow = isStaying ? '0 0 15px #0f0' : '0 0 15px #f00';
+    };
+    
+    updateBtnUI();
+    btn.style.cssText = 'position:fixed;top:20px;right:20px;padding:12px 20px;color:#fff;border:2px solid;border-radius:8px;cursor:pointer;z-index:9999;font-size:14px;font-weight:bold;transition:0.2s;';
+    
+    btn.onclick = () => {
+      const newState = localStorage.getItem('mb_stay_in_battle') !== 'true';
+      localStorage.setItem('mb_stay_in_battle', newState);
+      updateBtnUI();
+      showPopup(newState ? 'Режим: ОСТАТЬСЯ в битве' : 'Режим: Авто-возврат включен');
+      console.log(`[Loader] ⚔️ Режим битвы изменен на: ${newState ? 'Остаться' : 'Авто-возврат'}`);
+      
+      if (newState && battleQuestCheckInterval) {
+        clearInterval(battleQuestCheckInterval);
+        battleQuestCheckInterval = null;
+        console.log('[Loader] ⚔️ Таймер возврата принудительно остановлен переключателем.');
+      }
+    };
+    
+    document.body.appendChild(btn);
+  }
+
+  function checkAndCollectBattleRewards() {
+    if (!areBattleQuestsComplete() || _battleReturnGuard) return;
+    
+    _battleReturnGuard = true;
+    collectBattleRewards();
+    localStorage.setItem(`battle_flow_${getTodayKey()}`, 'true');
+
+    const isStaying = localStorage.getItem('mb_stay_in_battle') === 'true';
+    console.log(`[Loader] ⚔️ Квесты выполнены. Текущий режим: ${isStaying ? 'ОСТАТЬСЯ' : 'ВОЗВРАТ'}`);
+
+    if (!isStaying) {
+      console.log('[Loader] 🔄 Возврат на /balance через 5 сек...');
+      if (battleQuestCheckInterval) {
+        clearInterval(battleQuestCheckInterval);
+        battleQuestCheckInterval = null;
+      }
+      setTimeout(() => {
+        window.location.replace('https://mangabuff.ru/balance');
+      }, 5000);
+    } else {
+      console.log('[Loader] ⏸️ Режим "Остаться" активен. Редирект отменен.');
+      if (battleQuestCheckInterval) {
+        clearInterval(battleQuestCheckInterval);
+        battleQuestCheckInterval = null;
+      }
+    }
+  }
+
+  function initBattlePage() {
+    createBattleToggle();
+    checkAndCollectBattleRewards();
+    battleQuestCheckInterval = setInterval(checkAndCollectBattleRewards, BATTLE_CHECK_INTERVAL);
+  }
+
+  function clickUpdateDayButton() {
+    const buttons = document.querySelectorAll("button.button");
+    for (const btn of buttons) {
+      if (btn.textContent.includes("Обновить статистику за день")) {
+        btn.click();
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // ==========================================
+  // 🚶 ИМИТАЦИЯ ЧЕЛОВЕКА
+  // ==========================================
+  function scheduleRandomWander() {
+    const actions = [
+      { path: '/notifications', minDelay: 30*60*1000, maxDelay: 3*60*60*1000 },
+      { path: '/auctions', minDelay: 30*60*1000, maxDelay: 2*60*60*1000 },
+      { path: '/chat', minDelay: 40*60*1000, maxDelay: 2.5*60*60*1000 }
+    ];
+    const action = actions[Math.floor(Math.random() * actions.length)];
+    const delay = getRandomInt(action.minDelay, action.maxDelay);
+
+    console.log(`[Loader] 🚶 Планирую имитацию (${action.path}) через ~${Math.round(delay/60000)} мин.`);
+    setTimeout(() => {
+      console.log(`[Loader] 🚶 Перехожу на ${action.path}...`);
+      sessionStorage.setItem('mb_wander_target', action.path);
+      window.location.href = action.path;
+    }, delay);
+  }
+
+  // ==========================================
+  // 📄 СТРАНИЦА КВИЗА
+  // ==========================================
+  if (window.location.pathname.startsWith("/quiz")) {
+    let answer = "";
+    let clickCount = 0;
+    const MAX_CLICKS = 11;
+
+    $.ajaxSetup({
+      headers: { 'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content') },
+      complete: function (params) {
+        if ('question' in params.responseJSON) {
+          answer = params.responseJSON.question.correct_text || "";
+        }
+      }
+    });
+
+    const observer = new MutationObserver(mutations => {
+      for (let mutation of mutations) {
+        if (mutation.type === 'childList') {
+          const items = document.querySelectorAll('.quiz__answer-item');
+          if (clickCount === 0 && items.length > 0 && !answer) {
+            items[0].click();
+            clickCount++;
+            return;
+          }
+          items.forEach(item => {
+            if (answer && item.innerText.trim() === answer.trim()) {
+              if (clickCount < MAX_CLICKS) {
                 setTimeout(() => {
-                    if (clickUpdateDayButton()) {
-                        setTimeout(() => { if (!hasQuizToday()) window.location.href = "/quiz"; }, 5000 + Math.floor(Math.random() * 5000));
-                    } else { if (!hasQuizToday()) window.location.href = "/quiz"; }
-                }, 4000);
-                
-                scheduleRandomWander();
+                  item.click();
+                  clickCount++;
+                  if (clickCount >= MAX_CLICKS) {
+                    window.location.href = "/balance";
+                  }
+                }, 5000);
+              }
             }
-        }, initialDelay);
-    }
-    else if (window.location.pathname.startsWith("/battle")) {
-        setupCSRF();
-        initBattlePage();
-    }
+          });
+        }
+      }
+    });
+
+    const targetNode = document.querySelector('.quiz__answers');
+    if (targetNode) observer.observe(targetNode, { childList: true, subtree: true });
+  }
+
+  // ==========================================
+  // 📄 СТРАНИЦА УВЕДОМЛЕНИЙ (имитация)
+  // ==========================================
+  else if (window.location.pathname === '/notifications' && sessionStorage.getItem('mb_wander_target') === '/notifications') {
+    sessionStorage.removeItem('mb_wander_target');
+    setTimeout(() => {
+      const readAllBtn = document.querySelector('.notifications__read-all-btn');
+      if (readAllBtn && isVisible(readAllBtn)) readAllBtn.click();
+      setTimeout(() => { window.location.href = '/balance'; }, getRandomInt(20000, 160000));
+    }, getRandomInt(60000, 180000));
+  }
+
+  // ==========================================
+  // 📄 СТРАНИЦА АУКЦИОНОВ (имитация)
+  // ==========================================
+  else if (window.location.pathname === '/auctions' && sessionStorage.getItem('mb_wander_target') === '/auctions') {
+    sessionStorage.removeItem('mb_wander_target');
+    setTimeout(() => {
+      window.scrollBy({ top: getRandomInt(200, 600), behavior: 'smooth' });
+      setTimeout(() => {
+        const sortBtns = document.querySelectorAll('.comments__change-sort');
+        if (sortBtns.length > 0) sortBtns[Math.floor(Math.random() * sortBtns.length)].click();
+      }, 4000);
+      setTimeout(() => {
+        const textarea = document.querySelector('.comments__send-form textarea');
+        if (textarea) { textarea.focus(); setTimeout(() => textarea.blur(), 1500); }
+      }, 8000);
+    }, 3000);
+    setTimeout(() => { window.location.href = '/balance'; }, getRandomInt(150000, 210000));
+  }
+
+  // ==========================================
+  // 📄 СТРАНИЦА ЧАТА (имитация)
+  // ==========================================
+  else if (window.location.pathname === '/chat' && sessionStorage.getItem('mb_wander_target') === '/chat') {
+    sessionStorage.removeItem('mb_wander_target');
+    setTimeout(() => { window.scrollBy({ top: getRandomInt(300, 800), behavior: 'smooth' }); }, 4000);
+    setTimeout(() => { window.location.href = '/balance'; }, getRandomInt(60000, 180000));
+  }
+
+  // ==========================================
+  // 📄 СТРАНИЦА БАЛАНСА (основная логика)
+  // ==========================================
+  else if (window.location.pathname.startsWith("/balance")) {
+    setTimeout(async () => {
+      await ensureChaptersThenEvent();
+
+      if (getReadChapters() >= 10) {
+        setInterval(checkAndClaimRewards, CHECK_REWARD_INTERVAL);
+        checkAndClaimRewards();
+
+        if (isEventCompleted()) {
+          proceedEventCheck();
+        }
+
+        setInterval(clickAds, ADS_INTERVAL);
+        setInterval(mineLoop, MINE_INTERVAL);
+
+        setTimeout(() => {
+          if (clickUpdateDayButton()) {
+            setTimeout(() => {
+              if (!hasQuizToday()) {
+                window.location.href = "/quiz";
+              }
+            }, 5000 + Math.floor(Math.random() * 5000));
+          } else {
+            if (!hasQuizToday()) {
+              window.location.href = "/quiz";
+            }
+          }
+        }, 2000);
+
+        scheduleRandomWander();
+      }
+    }, 6000);
+  }
+
+  // ==========================================
+  // 📄 СТРАНИЦА БИТВЫ
+  // ==========================================
+  else if (window.location.pathname.startsWith("/battle")) {
+    initBattlePage();
+  }
 
 })();
