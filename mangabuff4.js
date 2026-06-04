@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         MangaBuff Loader
 // @namespace    http://tampermonkey.net/
-// @version      3.2.17
-// @description  Читает главы через readFromQueue + Проверка награды по cursor: pointer + ТОЧНЫЙ подсчет конфет + Битва + Имитация активности
+// @version      3.2.19
+// @description  Читает главы через readFromQueue + УМНЫЙ КУЛДАУН наград + ТОЧНЫЙ подсчет конфет + Битва + Имитация активности
 // @match        https://mangabuff.ru/balance
 // @match        https://mangabuff.ru/quiz
 // @match        https://mangabuff.ru/mine
@@ -18,8 +18,13 @@
 (function () {
   'use strict';
 
-  const EVENT_CANDIES_LIMIT = 35; 
-  console.log(`[Loader] 📦 Скрипт загружен v3.2.17 (Лимит конфет: ${EVENT_CANDIES_LIMIT})` );
+  // ==========================================
+  // ⚙️ НАСТРОЙКИ (меняй здесь!)
+  // ==========================================
+  const EVENT_CANDIES_LIMIT = 35; // ← МЕНЯЙ ЗДЕСЬ: 35 для основного, 10 для твинков
+  // ==========================================
+
+  console.log(`[Loader] 📦 Скрипт загружен v3.2.19 (Лимит: ${EVENT_CANDIES_LIMIT}, Умный кулдаун наград)` );
   
   const CHECK_REWARD_INTERVAL = 30000;
   const ADS_INTERVAL = 5000;
@@ -33,6 +38,9 @@
 
   let battleQuestCheckInterval = null;
   let _battleReturnGuard = false;
+  
+  // 🛡️ УМНЫЙ КУЛДАУН: запоминаем время последнего успешного сбора награды
+  let lastRewardClaimTime = 0;
 
   function getTodayKey() {
     return new Date().toLocaleDateString('ru-RU');
@@ -66,9 +74,8 @@
     return isVisible(btn) ? btn : null;
   }
 
-  // ✅ ПРОВЕРКА ИВЕНТА: используем EVENT_CANDIES_LIMIT вместо хардкода 35
+  // ✅ ПРОВЕРКА ИВЕНТА
   function isEventCompleted() {
-    // 1. Проверяем блок наград от Balance Stats
     const headings = document.querySelectorAll('.read_rewards_container h2');
     for (let h2 of headings) {
       if (h2.textContent.includes('Конфеты')) {
@@ -89,7 +96,6 @@
       }
     }
 
-    // 2. Fallback: проверяем через виджет квеста
     const eventBlock = document.querySelector('.wallet-panel__drop--event .wallet-panel__drop-text');
     const text = eventBlock?.textContent.replace(/\s+/g, ' ').trim() || '';
     const m = text.match(/Event\s+(\d+)\s+из\s+(\d+)/i);
@@ -200,17 +206,28 @@
     }
   }
 
+  // 🛡️ ОБНОВЛЕННАЯ ФУНКЦИЯ С "УМНЫМ КУЛДАУНОМ"
   function checkAndClaimRewards() {
+    // 1. Если с последнего успешного клика прошло меньше 10 минут, мы даже не проверяем кнопку.
+    // Это на 100% защищает от двойных кликов из-за лагов интерфейса сайта.
+    if (Date.now() - lastRewardClaimTime < 10 * 60 * 1000) {
+      return;
+    }
+
+    // 2. Запрашиваем элемент заново, чтобы не было "закэшированных" данных
     const rewardIcon = document.querySelector('.wallet-panel__drop--read_rewards .wallet-panel__drop-icon');
     if (!rewardIcon || !isVisible(rewardIcon)) return;
 
     const style = window.getComputedStyle(rewardIcon);
-    if (style.cursor === 'pointer') {
-      console.log('[Loader] 🎁 Награда доступна (cursor: pointer)! Забираем.');
+    
+    // 3. Строгая проверка: курсор должен быть pointer, И элемент не должен быть заблокирован
+    if (style.cursor === 'pointer' && style.pointerEvents !== 'none') {
+      console.log('[Loader] 🎁 Награда доступна! Забираем.');
       rewardIcon.click();
       showPopup('Награда за чтение');
-    } else {
-      console.log('[Loader] 🎁 Награда ещё не готова. Пропускаем.');
+      
+      // 4. ЗАПИСЫВАЕМ ВРЕМЯ УСПЕШНОГО КЛИКА. Следующая проверка будет проигнорирована 10 минут.
+      lastRewardClaimTime = Date.now();
     }
   }
 
@@ -486,7 +503,7 @@
 
       if (getReadChapters() >= 10) {
         setInterval(checkAndClaimRewards, CHECK_REWARD_INTERVAL);
-        checkAndClaimRewards();
+        checkAndClaimRewards(); // Первая проверка сразу
 
         if (isEventCompleted()) {
           proceedEventCheck();
