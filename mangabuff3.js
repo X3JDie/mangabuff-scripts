@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         MangaBuff Loader
 // @namespace    http://tampermonkey.net/
-// @version      3.2.10
-// @description  Подключает основной скрипт из локального файла
+// @version      3.2.12
+// @description  Читает главы через window.readFromQueue (не конфликтует с Balance stats)
 // @match        https://mangabuff.ru/balance 
 // @match        https://mangabuff.ru/quiz
 // @match        https://mangabuff.ru/mine
@@ -13,7 +13,7 @@
 (function () {
   'use strict';
 
-  console.log("[Loader] 📦Скрипт загружен из GitHub  Эвент окончен v3.2.10 (обновлены селекторы, без комментариев)" );
+  console.log("[Loader] 📦 Скрипт загружен v3.2.12 (через readFromQueue, без конфликтов)" );
   
   const CHECK_REWARD_INTERVAL = 30000;
   const ADS_INTERVAL = 5000;
@@ -135,52 +135,81 @@ function proceedEventCheck() {
   }
   
   function getReadChapters() {
-  const block = document.querySelector('.wallet-panel__drop--read .wallet-panel__drop-text');
-  const m = block?.textContent.match(/Глав\s+(\d+)\s+из\s+(\d+)/);
-  return m ? +m[1] : 0;
-}
-
-function clickReadButton() {
-  const btn = findQuestButton('read');
-  if (btn) {
-    btn.click();
-    showPopup('Чтение главы');
+    const block = document.querySelector('.wallet-panel__drop--read .wallet-panel__drop-text');
+    const m = block?.textContent.match(/(\d+)\s+из\s+(\d+)/);
+    return m ? +m[1] : 0;
   }
-}
 
-function ensureChaptersThenEvent() {
-  const chapters = getReadChapters();
-
-  if (chapters < 5) {
-    clickReadButton();
-    const interval5 = setInterval(() => {
-      if (getReadChapters() >= 5) {
-        clearInterval(interval5);
-        location.reload(); 
+  // ✅ НОВОЕ: читаем главу через внутренний API (не через клик!)
+  async function readOneChapterDirect() {
+    // Пробуем использовать внутренний API сайта (как Balance stats)
+    if (typeof window.readFromQueue === 'function') {
+      try {
+        const res = await window.readFromQueue();
+        if (res) {
+          console.log('[Loader] 📚 Глава прочитана через readFromQueue');
+          return true;
+        }
+      } catch (e) {
+        console.log('[Loader] 📚 readFromQueue ошибка:', e.message);
       }
-    }, 5000);
-    return;
+    }
+    // Fallback: обычный клик
+    const btn = findQuestButton('read');
+    if (btn) {
+      btn.click();
+      showPopup('Чтение главы (fallback)');
+      return true;
+    }
+    return false;
   }
 
-  if (chapters < 10) {
-    clickReadButton();
-    const interval10 = setInterval(() => {
-      if (getReadChapters() >= 10) {
-        clearInterval(interval10);
-        location.reload();
+  // ✅ НОВОЕ: async функция чтения до N глав
+  async function readChaptersUpTo(target) {
+    let chapters = getReadChapters();
+    console.log(`[Loader] 📚 Начинаю чтение. Текущий прогресс: ${chapters}/${target}`);
+    
+    while (chapters < target) {
+      const success = await readOneChapterDirect();
+      if (!success) {
+        console.log('[Loader] 📚 Не удалось прочитать главу, жду...');
+        await new Promise(r => setTimeout(r, 5000));
+        continue;
       }
-    }, 5000);
-    return;
+      
+      // Ждём 10 секунд между главами (как в Balance stats)
+      await new Promise(r => setTimeout(r, 10000));
+      
+      chapters = getReadChapters();
+      console.log(`[Loader] 📚 Прогресс: ${chapters}/${target}`);
+      
+      if (chapters >= target) {
+        console.log(`[Loader] 📚 ✅ Достигнуто ${target} глав!`);
+        return;
+      }
+    }
   }
 
-  if (!localStorage.getItem("chapters_reload_done")) {
-    localStorage.setItem("chapters_reload_done", "true");
-    location.reload();
-  } else {
-    console.log("[Loader] Главы >= 10, reload уже был");
-    clickEventButton();
+  // ✅ ПЕРЕПИСАНО: async версия
+  async function ensureChaptersThenEvent() {
+    const chapters = getReadChapters();
+    console.log(`[Loader] 📚 Текущий прогресс: ${chapters} глав`);
+
+    if (chapters < 10) {
+      // Читаем до 10 глав через прямой API
+      await readChaptersUpTo(10);
+    }
+
+    // >= 10 глав
+    if (!localStorage.getItem("chapters_reload_done")) {
+      console.log('[Loader] 📚 ✅ Главы >= 10. Делаю reload...');
+      localStorage.setItem("chapters_reload_done", "true");
+      location.reload();
+    } else {
+      console.log("[Loader] 📚 Главы >= 10, reload уже был. Кликаю ивент.");
+      clickEventButton();
+    }
   }
-}
 
   function clickReward() {
     const btn = findQuestButton('read_rewards');
@@ -376,8 +405,8 @@ function clickUpdateDayButton() {
 }
 
 if (window.location.pathname.startsWith("/balance")) {
-  setTimeout(() => {
-    ensureChaptersThenEvent();
+  setTimeout(async () => {
+    await ensureChaptersThenEvent();
 
     if (isEventCompleted() && getReadChapters() >= 10) {
       proceedEventCheck();
