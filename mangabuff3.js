@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         MangaBuff Loader
 // @namespace    http://tampermonkey.net/
-// @version      1.12.1
-// @description  Жёсткие перезагрузки + Задержка 10-120с + Защита от сжигания глав + Умные комментарии + Битва + 180мин карты + Имитация человека + АВТО-СБОР ИВЕНТА (1 клик + мониторинг)
+// @version      1.12.2
+// @description  Жёсткие перезагрузки + Задержка 10-120с + Чтение ТОЛЬКО до 10 глав + Ивент 1 клик + Битва + Имитация человека
 // @match        https://mangabuff.ru/balance
 // @match        https://mangabuff.ru/quiz
 // @match        https://mangabuff.ru/mine
@@ -18,15 +18,14 @@
 
 (function () {
     'use strict';
-    console.log("[Loader] 📦 Скрипт загружен. Версия 1.12.1 (Ивент: 1 клик + мониторинг)");
+    console.log("[Loader] 📦 Скрипт загружен. Версия 1.12.2 (Чтение ТОЛЬКО до 10 глав)");
 
     // ==========================================
     // ⚙️ НАСТРОЙКИ
     // ==========================================
     const CARD_COOLDOWN_MINUTES = 181;
     const SCROLL_CHECK_MINUTES = 19;
-    const MAX_FAILED_READ_ATTEMPTS = 5;
-    const EVENT_MONITOR_INTERVAL = 10000; // Проверка прогресса ивента каждые 10 сек
+    const EVENT_MONITOR_INTERVAL = 10000;
     // ==========================================
 
     function setupCSRF() {
@@ -66,7 +65,6 @@
     let commentsClickedThisSession = 0;
     let commentQuestActive = false;
 
-    // 🎉 НОВОЕ: состояние ивента
     let isMonitoringEvent = false;
     let eventMonitorInterval = null;
 
@@ -159,7 +157,7 @@
     // ==========================================
     function getEventProgress() {
         const block = document.querySelector('.wallet-panel__drop--event .wallet-panel__drop-text');
-        if (!block) return null; // Ивента нет на странице
+        if (!block) return null;
         const text = block.textContent.trim();
         const m = text.match(/(\d+)\s*из\s*(\d+)/i);
         if (m) {
@@ -218,7 +216,6 @@
                 console.log(`[Loader] 🎉 🎯 ИВЕНТ ВЫПОЛНЕН! Прогресс: ${progress.current}/${progress.total}`);
                 showPopup('🎉 Ивент собран!');
                 stopEventMonitoring('выполнен');
-                // Reload чтобы обновить страницу и забрать награды
                 if (!localStorage.getItem("event_done_reload_" + getTodayKey())) {
                     localStorage.setItem("event_done_reload_" + getTodayKey(), "true");
                     setTimeout(() => location.reload(), 3000);
@@ -226,7 +223,6 @@
                 return;
             }
 
-            // Если ивент ещё не выполнен, но кнопка снова активна (например, после перезагрузки) — кликаем ещё раз
             const btn = findQuestButton('event');
             if (btn && isVisible(btn)) {
                 console.log('[Loader] 🎉 Кнопка ивента снова активна. Делаю повторный клик...');
@@ -251,11 +247,9 @@
 
         console.log(`[Loader] 🎉 Ивент активен! Прогресс: ${progress.current}/${progress.total}.`);
         
-        // Делаем ОДИН клик по кнопке ивента
         const clicked = clickEventButtonOnce();
         
         if (clicked) {
-            // Запускаем мониторинг прогресса
             startEventMonitoring();
         }
     }
@@ -355,109 +349,74 @@
     }
 
     // ==========================================
-    // БЕЗОПАСНОЕ ЧТЕНИЕ ГЛАВ (С ЗАЩИТОЙ ОТ СЖИГАНИЯ)
+    // 📚 ЧТЕНИЕ ГЛАВ (ТОЛЬКО ДО 10 ГЛАВ!)
     // ==========================================
     function getReadChapters() {
         const block = document.querySelector('.wallet-panel__drop--read .wallet-panel__drop-text');
-        if (!block) {
-            console.log('[Loader]  ⚠️ Блок чтения не найден в DOM');
-            return -1;
-        }
+        if (!block) return -1;
         const m = block.textContent.match(/(\d+)\s+из\s+(\d+)/);
-        const result = m ? +m[1] : -1;
-        console.log(`[Loader] 📚 Счётчик глав: ${result === -1 ? 'не определён' : result}`);
-        return result;
+        return m ? +m[1] : -1;
     }
 
     function clickReadButton() {
-        const chapters = getReadChapters();
-        if (chapters === -1) {
-            console.log('[Loader] 📚 ⚠️ Не могу проверить счётчик, пропускаю клик');
-            return false;
-        }
-        if (chapters >= 75) {
-            console.log('[Loader] 📚 🛑 Лимит 75 глав достигнут. Останавливаюсь.');
-            return false;
-        }
         const btn = findQuestButton('read');
         if (btn) { 
             btn.click(); 
             showPopup('Чтение главы'); 
-            console.log(`[Loader]  ✅ Кликнул кнопку чтения. Текущий прогресс: ${chapters}/75`);
             return true; 
         }
-        console.log('[Loader] 📚 ❌ Кнопка чтения не найдена или невидима');
         return false;
     }
 
     function ensureChaptersThenEvent() {
-        console.log('[Loader] 📚 === ЗАПУСК ЛОГИКИ ЧТЕНИЯ ГЛАВ ===');
+        console.log('[Loader] 📚 === ЗАПУСК ЛОГИКИ ЧТЕНИЯ ГЛАВ (до 10) ===');
         
-        let currentChapters = getReadChapters();
+        const chapters = getReadChapters();
         
-        if (currentChapters === -1) {
+        if (chapters === -1) {
             console.log('[Loader] 📚 ⏳ DOM ещё не загрузился, повторю через 3 сек...');
             setTimeout(ensureChaptersThenEvent, 3000);
             return;
         }
-        
-        if (currentChapters >= 75) {
-            console.log('[Loader] 📚 🛑 Лимит 75 глав уже достигнут. Пропускаю чтение.');
-            return;
-        }
-        
-        if (currentChapters >= 10) {
-            console.log(`[Loader]  ✅ Уже прочитано ${currentChapters} глав (>=10). Перехожу к Event.`);
-            if (!localStorage.getItem("chapters_reload_done")) {
-                localStorage.setItem("chapters_reload_done", "true");
-                setTimeout(() => location.reload(), 3000);
-            }
+
+        // ЛОГИКА ИЗ СТАРОГО СКРИПТА: читаем до 5, потом до 10, потом СТОП
+        if (chapters < 5) {
+            console.log(`[Loader] 📚 📖 Читаю до 5 глав. Текущий прогресс: ${chapters}/5`);
+            clickReadButton();
+            const interval5 = setInterval(() => {
+                const current = getReadChapters();
+                if (current >= 5) {
+                    clearInterval(interval5);
+                    console.log('[Loader] 📚 ✅ Достигнуто 5 глав. Reload...');
+                    location.reload(); 
+                }
+            }, 5000);
             return;
         }
 
-        console.log(`[Loader] 📚 📖 Начинаю чтение. Текущий прогресс: ${currentChapters}/10`);
-        
-        clickReadButton();
-        let lastKnownChapters = currentChapters;
-        let failedAttempts = 0;
-        
-        const readInterval = setInterval(() => {
-            currentChapters = getReadChapters();
-            
-            if (currentChapters === -1) {
-                console.log('[Loader]  ⚠️ DOM временно недоступен, жду...');
-                return;
-            }
-            
-            if (currentChapters >= 10) {
-                clearInterval(readInterval);
-                console.log(`[Loader] 📚 🎯 ЦЕЛЬ ДОСТИГНУТА! Прочитано ${currentChapters} глав.`);
-                if (!localStorage.getItem("chapters_reload_done")) {
-                    localStorage.setItem("chapters_reload_done", "true");
-                    setTimeout(() => location.reload(), 3000);
+        if (chapters < 10) {
+            console.log(`[Loader] 📚 📖 Читаю до 10 глав. Текущий прогресс: ${chapters}/10`);
+            clickReadButton();
+            const interval10 = setInterval(() => {
+                const current = getReadChapters();
+                if (current >= 10) {
+                    clearInterval(interval10);
+                    console.log('[Loader] 📚 ✅ Достигнуто 10 глав. Reload...');
+                    location.reload();
                 }
-                return;
-            }
-            
-            if (currentChapters === lastKnownChapters) {
-                failedAttempts++;
-                console.log(`[Loader] 📚 ⚠️ Прогресс не изменился: ${currentChapters}. Неудачная попытка ${failedAttempts}/${MAX_FAILED_READ_ATTEMPTS}`);
-                
-                if (failedAttempts >= MAX_FAILED_READ_ATTEMPTS) {
-                    console.log(`[Loader] 📚 🛑 СЛИШКОМ МНОГО НЕУДАЧ (${failedAttempts}). Останавливаю чтение, чтобы не сжечь лимит.`);
-                    clearInterval(readInterval);
-                    showPopup('Чтение остановлено (сервер не отвечает)');
-                    return;
-                }
-                
-                console.log('[Loader] 📚 Повторный клик...');
-                clickReadButton();
-            } else {
-                console.log(`[Loader]  ✅ Прогресс обновлён: ${lastKnownChapters} → ${currentChapters}`);
-                lastKnownChapters = currentChapters;
-                failedAttempts = 0;
-            }
-        }, 15000 + Math.random() * 5000);
+            }, 5000);
+            return;
+        }
+
+        // Если уже >= 10 глав
+        if (!localStorage.getItem("chapters_reload_done")) {
+            console.log('[Loader] 📚 ✅ Главы >= 10. Делаю reload...');
+            localStorage.setItem("chapters_reload_done", "true");
+            location.reload();
+        } else {
+            console.log('[Loader] 📚 ✅ Главы >= 10, reload уже был. Запускаю ивент.');
+            clickEventButtonOnce(); // ← КЛЮЧЕВОЕ: после 10 глав кликаем ивент
+        }
     }
 
     // ==========================================
@@ -765,13 +724,11 @@
         if (targetNode) observer.observe(targetNode, { childList: true, subtree: true });
     }
     else if (window.location.pathname.startsWith("/balance")) {
-        // ЖЁСТКИЕ ПЕРЕЗАГРУЗКИ
         if (handleHardReloads()) {
             console.log('[Loader] ⏸️ Ожидаю перезагрузку страницы...');
             return;
         }
         
-        // ЗАДЕРЖКА 10-120 СЕКУНД ПЕРЕД НАЧАЛОМ ДЕЙСТВИЙ
         const initialDelay = getRandomInt(10000, 120000);
         console.log(`[Loader] ⏳ Задержка перед началом действий: ${Math.round(initialDelay/1000)} секунд (имитация человека)...`);
         
@@ -780,10 +737,6 @@
             
             console.log('[Loader] 🚀 Запуск основной логики /balance');
             
-            // 🎉 ПРИОРИТЕТ №1: Если есть ивент — запускаем его СРАЗУ (1 клик + мониторинг)
-            checkAndStartEvent();
-            
-            // Чтение глав (параллельно с ивентом)
             ensureChaptersThenEvent();
             
             if (getReadChapters() >= 10 || getReadChapters() === -1) {
@@ -801,7 +754,6 @@
                 scheduleChatDiamond();
                 setInterval(tryStartCommentQuest, 10000);
                 
-                // 🎉 Периодическая проверка ивента (если мониторинг остановился, но ивент ещё активен)
                 setInterval(() => {
                     if (!isMonitoringEvent) {
                         console.log('[Loader] 🎉 Повторная проверка ивента...');
